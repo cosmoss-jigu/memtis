@@ -566,6 +566,9 @@ struct cftype {
 	struct cgroup_subsys *ss;	/* NULL for cgroup core files */
 	struct list_head node;		/* anchored at ss->cfts */
 	struct kernfs_ops *kf_ops;
+#ifdef CONFIG_HTMM /* struct cftype */
+	int numa_node_id;
+#endif
 
 	int (*open)(struct kernfs_open_file *of);
 	void (*release)(struct kernfs_open_file *of);

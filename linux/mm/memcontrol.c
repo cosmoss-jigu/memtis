@@ -5125,6 +5125,9 @@ static int alloc_mem_cgroup_per_node_info(struct mem_cgroup *memcg, int node)
 	pn->usage_in_excess = 0;
 	pn->on_tree = false;
 	pn->memcg = memcg;
+#ifdef CONFIG_HTMM /* alloc_mem_cgroup_per_node_info() */
+	pn->max_nr_base_pages = ULONG_MAX;
+#endif
 
 	memcg->nodeinfo[node] = pn;
 	return 0;
@@ -5214,6 +5217,9 @@ static struct mem_cgroup *mem_cgroup_alloc(void)
 	spin_lock_init(&memcg->deferred_split_queue.split_queue_lock);
 	INIT_LIST_HEAD(&memcg->deferred_split_queue.split_queue);
 	memcg->deferred_split_queue.split_queue_len = 0;
+#endif
+#ifdef CONFIG_HTMM /* mem_cgroup_alloc() */
+	memcg->htmm_enabled = false;
 #endif
 	idr_replace(&mem_cgroup_idr, memcg, memcg->id.id);
 	return memcg;
@@ -7509,3 +7515,130 @@ static int __init mem_cgroup_swap_init(void)
 core_initcall(mem_cgroup_swap_init);
 
 #endif /* CONFIG_MEMCG_SWAP */
+
+#ifdef CONFIG_HTMM /* memcg interfaces for htmm */
+static int memcg_htmm_show(struct seq_file *m, void *v)
+{
+    struct mem_cgroup *memcg = mem_cgroup_from_css(seq_css(m));
+
+    if (memcg->htmm_enabled)
+	seq_printf(m, "[enabled] disabled\n");
+    else
+	seq_printf(m, "enabled [disabled]\n");
+
+    return 0;
+}
+
+static ssize_t memcg_htmm_write(struct kernfs_open_file *of,
+	char *buf, size_t nbytes, loff_t off)
+{
+    struct mem_cgroup *memcg = mem_cgroup_from_css(of_css(of));
+    int nid;
+
+    if (sysfs_streq(buf, "enabled"))
+	memcg->htmm_enabled = true;
+    else if (sysfs_streq(buf, "disabled"))
+	memcg->htmm_enabled = false;
+    else
+	return -EINVAL;
+
+    for_each_node_state(nid, N_MEMORY) {
+	struct pglist_data *pgdat = NODE_DATA(nid);
+	
+	if (memcg->htmm_enabled)
+	    WRITE_ONCE(pgdat->kswapd_failures, MAX_RECLAIM_RETRIES);
+	else
+	    WRITE_ONCE(pgdat->kswapd_failures, 0);
+    }
+
+    return nbytes;
+}
+
+static struct cftype memcg_htmm_file[] = {
+    {
+	.name = "htmm_enabled",
+	.flags = CFTYPE_NOT_ON_ROOT,
+	.seq_show = memcg_htmm_show,
+	.write = memcg_htmm_write,
+    },
+    {}, /* terminate */
+};
+
+static int __init mem_cgroup_htmm_init(void)
+{
+    WARN_ON(cgroup_add_dfl_cftypes(&memory_cgrp_subsys,
+		memcg_htmm_file));
+    return 0;
+}
+subsys_initcall(mem_cgroup_htmm_init);
+
+static int memcg_per_node_max_show(struct seq_file *m, void *v)
+{
+    struct mem_cgroup *memcg = mem_cgroup_from_css(seq_css(m));
+    struct cftype *cur_file = seq_cft(m);
+    int nid = cur_file->numa_node_id;
+    unsigned long max = READ_ONCE(memcg->nodeinfo[nid]->max_nr_base_pages);
+
+    if (max == ULONG_MAX)
+	seq_puts(m, "max\n");
+    else
+	seq_printf(m, "%llu\n", (u64)max * PAGE_SIZE);
+
+    return 0;
+}
+
+static ssize_t memcg_per_node_max_write(struct kernfs_open_file *of,
+	char *buf, size_t nbytes, loff_t off)
+{
+    struct mem_cgroup *memcg = mem_cgroup_from_css(of_css(of));
+    struct cftype *cur_file = of_cft(of);
+    int nid = cur_file->numa_node_id;
+    unsigned long max;
+    int err;
+
+    buf = strstrip(buf);
+    err = page_counter_memparse(buf, "max", &max);
+    if (err)
+	return err;
+
+    xchg(&memcg->nodeinfo[nid]->max_nr_base_pages, max);
+
+    return nbytes;
+}
+
+static int pgdat_memcg_htmm_init(struct pglist_data *pgdat)
+{
+    pgdat->memcg_htmm_file = kzalloc(sizeof(struct cftype) * 2, GFP_KERNEL);
+    if (!pgdat->memcg_htmm_file) {
+	printk("error: fails to allocate pgdat->memcg_htmm_file\n");
+	return -ENOMEM;
+    }
+    return 0;
+}
+
+int mem_cgroup_per_node_htmm_init(void)
+{
+    int nid;
+
+    for_each_node_state(nid, N_MEMORY) {
+	struct pglist_data *pgdat = NODE_DATA(nid);
+
+	if (!pgdat || pgdat->memcg_htmm_file)
+	    continue;
+	if (pgdat_memcg_htmm_init(pgdat))
+	    continue;
+
+	snprintf(pgdat->memcg_htmm_file[0].name, MAX_CFTYPE_NAME,
+		"max_at_node%d", nid);
+	pgdat->memcg_htmm_file[0].flags = CFTYPE_NOT_ON_ROOT;
+	pgdat->memcg_htmm_file[0].seq_show = memcg_per_node_max_show;
+	pgdat->memcg_htmm_file[0].write = memcg_per_node_max_write;
+	pgdat->memcg_htmm_file[0].numa_node_id = nid;
+
+	WARN_ON(cgroup_add_dfl_cftypes(&memory_cgrp_subsys,
+		    pgdat->memcg_htmm_file));
+    }
+    return 0;
+}
+subsys_initcall(mem_cgroup_per_node_htmm_init);
+#endif /* CONFIG_HTMM */

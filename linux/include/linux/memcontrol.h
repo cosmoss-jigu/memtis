@@ -141,7 +141,9 @@ struct mem_cgroup_per_node {
 	struct lruvec_stats			lruvec_stats;
 
 	unsigned long		lru_zone_size[MAX_NR_ZONES][NR_LRU_LISTS];
-
+#ifdef CONFIG_HTMM /* struct mem_cgroup_per_node */
+	unsigned long		max_nr_base_pages; /* Set by "max_at_node" param */
+#endif
 	struct mem_cgroup_reclaim_iter	iter;
 
 	struct shrinker_info __rcu	*shrinker_info;
@@ -345,6 +347,10 @@ struct mem_cgroup {
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 	struct deferred_split deferred_split_queue;
+#endif
+
+#ifdef CONFIG_HTMM /* struct mem_cgroup */
+	bool htmm_enabled;
 #endif
 
 	struct mem_cgroup_per_node *nodeinfo[];
@@ -1746,4 +1752,7 @@ static inline struct mem_cgroup *mem_cgroup_from_obj(void *p)
 
 #endif /* CONFIG_MEMCG_KMEM */
 
+#ifdef CONFIG_HTMM
+extern int mem_cgroup_per_node_htmm_init(void);
+#endif
 #endif /* _LINUX_MEMCONTROL_H */

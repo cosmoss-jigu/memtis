@@ -897,6 +897,17 @@ config IO_MAPPING
 config SECRETMEM
 	def_bool ARCH_HAS_SET_DIRECT_MAP && !EMBEDDED
 
+config HTMM
+	bool "Enable hugepage-aware tiered memory management"
+	depends on MIGRATION && TRANSPARENT_HUGEPAGE
+	help
+	  Enable memory access sampling and dynamic placement for
+	  tiered memory systems (DRAM + NVM). This optimizes the system
+	  performance in tiered memory systems by coordinating transparent
+	  hugepage support with tiered memory management.
+
+	  If in doubt, say N.
+
 source "mm/damon/Kconfig"
 
 endmenu
