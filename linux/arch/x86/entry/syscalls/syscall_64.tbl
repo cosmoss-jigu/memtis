@@ -370,6 +370,8 @@
 446	common	landlock_restrict_self	sys_landlock_restrict_self
 447	common	memfd_secret		sys_memfd_secret
 448	common	process_mrelease	sys_process_mrelease
+449	common	htmm_start		sys_htmm_start
+450	common	htmm_end		sys_htmm_end
 
 #
 # Due to a historical design error, certain syscalls are numbered differently
