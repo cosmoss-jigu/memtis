@@ -2976,6 +2976,10 @@ void mpol_to_str(char *buffer, int maxlen, struct mempolicy *pol)
 }
 
 bool numa_demotion_enabled = false;
+#ifdef CONFIG_HTMM
+unsigned int htmm_thres_hot = 3;
+unsigned int htmm_thres_cold = 7;
+#endif
 
 #ifdef CONFIG_SYSFS
 static ssize_t numa_demotion_enabled_show(struct kobject *kobj,
@@ -3034,4 +3038,88 @@ delete_obj:
 	return err;
 }
 subsys_initcall(numa_init_sysfs);
+#ifdef CONFIG_HTMM
+static ssize_t htmm_thres_hot_show(struct kobject *kobj,
+				   struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%u\n", htmm_thres_hot);
+}
+
+static ssize_t htmm_thres_hot_store(struct kobject *kobj,
+				    struct kobj_attribute *attr,
+				    const char *buf, size_t count)
+{
+	int err;
+	unsigned int thres;
+
+	err = kstrtouint(buf, 10, &thres);
+	if (err)
+		return err;
+
+	WRITE_ONCE(htmm_thres_hot, thres);
+	return count;
+}
+
+static struct kobj_attribute htmm_thres_hot_attr =
+	__ATTR(htmm_thres_hot, 0644, htmm_thres_hot_show,
+	       htmm_thres_hot_store);
+
+static ssize_t htmm_thres_cold_show(struct kobject *kobj,
+				    struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%u\n", htmm_thres_cold);
+}
+
+static ssize_t htmm_thres_cold_store(struct kobject *kobj,
+				     struct kobj_attribute *attr,
+				     const char *buf, size_t count)
+{
+	int err;
+	unsigned int thres;
+
+	err = kstrtouint(buf, 10, &thres);
+	if (err)
+		return err;
+
+	WRITE_ONCE(htmm_thres_cold, thres);
+	return count;
+}
+
+static struct kobj_attribute htmm_thres_cold_attr =
+	__ATTR(htmm_thres_cold, 0644, htmm_thres_cold_show,
+	       htmm_thres_cold_store);
+
+static struct attribute *htmm_attrs[] = {
+	&htmm_thres_hot_attr.attr,
+	&htmm_thres_cold_attr.attr,
+	NULL,
+};
+
+static const struct attribute_group htmm_attr_group = {
+	.attrs = htmm_attrs,
+};
+
+static int __init htmm_init_sysfs(void)
+{
+	int err;
+	struct kobject *htmm_kobj;
+
+    	htmm_kobj = kobject_create_and_add("htmm", mm_kobj);
+	if (!htmm_kobj) {
+		pr_err("failed to create htmm kobject\n");
+		return -ENOMEM;
+	}
+	err = sysfs_create_group(htmm_kobj, &htmm_attr_group);
+	if (err) {
+		pr_err("failed to register numa group\n");
+		goto delete_obj;
+	}
+	return 0;
+
+delete_obj:
+	kobject_put(htmm_kobj);
+	return err;
+}
+subsys_initcall(htmm_init_sysfs);
+#endif /* CONFIG_HTMM */
 #endif

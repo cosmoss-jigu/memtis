@@ -34,6 +34,7 @@
 #include <linux/oom.h>
 #include <linux/numa.h>
 #include <linux/page_owner.h>
+#include <linux/htmm.h>
 
 #include <asm/tlb.h>
 #include <asm/pgalloc.h>
@@ -779,7 +780,11 @@ vm_fault_t do_huge_pmd_anonymous_page(struct vm_fault *vmf)
 		count_vm_event(THP_FAULT_FALLBACK);
 		return VM_FAULT_FALLBACK;
 	}
+#ifdef CONFIG_HTMM
+	prep_transhuge_page_for_htmm(vma, page);
+#else
 	prep_transhuge_page(page);
+#endif
 	return __do_huge_pmd_anonymous_page(vmf, page, gfp);
 }
 

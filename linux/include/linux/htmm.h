@@ -1,5 +1,5 @@
 
-
+#include <uapi/linux/perf_event.h>
 
 #define BUFFER_SIZE	512 /* 1MB */
 #define CPUS_PER_SOCKET 20
@@ -30,8 +30,12 @@ enum events {
     N_HTMMEVENTS
 };
 
+/* htmm_core.c */
+extern void htmm_mm_init(struct mm_struct *mm);
+extern void prep_transhuge_page_for_htmm(struct vm_area_struct *vma,
+					 struct page *page);
+extern void update_pginfo(pid_t pid, unsigned long address);
 
-
-
+/* htmm_sampler.c */
 extern int ksamplingd_init(pid_t pid, int node);
 extern void ksamplingd_exit(void);

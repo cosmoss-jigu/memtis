@@ -87,7 +87,7 @@ static int pebs_init(pid_t pid, int node)
 		continue;
 	    }
 
-	    if (__perf_event_open(DRAM_LLC_LOAD_MISS, 0, cpu, event, pid))
+	    if (__perf_event_open(get_pebs_event(event), 0, cpu, event, pid))
 		return -1;
 	    if (htmm__perf_event_init(mem_event[cpu][event], BUFFER_SIZE))
 		return -1;
@@ -161,7 +161,7 @@ static int ksamplingd(void *data)
 			    break;
 			}
 
-			/* TODO: update page info */
+			update_pginfo(he->pid, he->addr);
 			nr_sampled++;
 			break;
 		    case PERF_RECORD_THROTTLE:

@@ -99,6 +99,9 @@ static inline pgtable_t pte_alloc_one(struct mm_struct *mm)
 static inline void pte_free(struct mm_struct *mm, struct page *pte_page)
 {
 	pgtable_pte_page_dtor(pte_page);
+#ifdef CONFIG_HTMM
+	free_pginfo_pte(pte_page);
+#endif
 	__free_page(pte_page);
 }
 

@@ -159,10 +159,30 @@ struct page {
 			/* For both global and memcg */
 			struct list_head deferred_list;
 		};
+#ifdef CONFIG_HTMM
+		struct {	/* Third tail page of compound page */
+			unsigned long __compound_pad_1;	/* compound_head */
+			unsigned long hot_utils;
+			unsigned long total_accesses;
+			unsigned long cur_hv;	/* current hotness val */
+			unsigned long prev_hv;	/* prev hotness val */
+		};
+		struct {	/* Fourth~ tail pages of compound page */
+			unsigned long ___compound_pad_1;/* compound_head */
+			pginfo_t compound_pginfo[8];	/* 32 bytes */
+		};
+#endif
 		struct {	/* Page table pages */
 			unsigned long _pt_pad_1;	/* compound_head */
 			pgtable_t pmd_huge_pte; /* protected by page->ptl */
+#ifdef CONFIG_HTMM
+			union {
+				pginfo_t *pginfo;
+				unsigned long _pt_pad_2;
+			};
+#else
 			unsigned long _pt_pad_2;	/* mapping */
+#endif
 			union {
 				struct mm_struct *pt_mm; /* x86 pgds only */
 				atomic_t pt_frag_refcount; /* powerpc */
@@ -579,6 +599,10 @@ struct mm_struct {
 
 #ifdef CONFIG_IOMMU_SUPPORT
 		u32 pasid;
+#endif
+
+#ifdef CONFIG_HTMM
+		bool htmm_enabled;
 #endif
 	} __randomize_layout;
 

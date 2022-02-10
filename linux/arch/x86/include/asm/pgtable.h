@@ -722,6 +722,17 @@ static inline pgd_t pti_set_user_pgtbl(pgd_t *pgdp, pgd_t pgd)
 #include <linux/log2.h>
 #include <asm/fixmap.h>
 
+#ifdef CONFIG_HTMM
+static inline pginfo_t *get_pginfo_from_pte(pte_t *pte)
+{
+    struct page *page = virt_to_page((unsigned long)pte);
+    unsigned long idx;
+
+    idx = ((unsigned long)(pte) & ~PAGE_MASK) / 8;
+    return &page->pginfo[idx];
+}
+#endif
+
 static inline int pte_none(pte_t pte)
 {
 	return !(pte.pte & ~(_PAGE_KNL_ERRATUM_MASK));
