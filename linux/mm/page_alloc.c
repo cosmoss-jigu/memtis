@@ -7409,6 +7409,8 @@ static void __meminit pgdat_init_internals(struct pglist_data *pgdat)
 	lruvec_init(&pgdat->__lruvec);
 #ifdef CONFIG_HTMM /* pgdat_init_internals() */
 	pgdat->memcg_htmm_file = NULL;
+	spin_lock_init(&pgdat->kmigraterd_lock);
+	INIT_LIST_HEAD(&pgdat->kmigraterd_head);
 #endif
 }
 

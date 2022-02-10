@@ -67,6 +67,7 @@
 #include <net/ip.h>
 #include "slab.h"
 
+#include <linux/htmm.h>
 #include <linux/uaccess.h>
 
 #include <trace/events/vmscan.h>
@@ -5127,6 +5128,7 @@ static int alloc_mem_cgroup_per_node_info(struct mem_cgroup *memcg, int node)
 	pn->memcg = memcg;
 #ifdef CONFIG_HTMM /* alloc_mem_cgroup_per_node_info() */
 	pn->max_nr_base_pages = ULONG_MAX;
+	INIT_LIST_HEAD(&pn->kmigraterd_list);
 #endif
 
 	memcg->nodeinfo[node] = pn;
@@ -5148,8 +5150,12 @@ static void __mem_cgroup_free(struct mem_cgroup *memcg)
 {
 	int node;
 
-	for_each_node(node)
+	for_each_node(node) {
+#ifdef CONFIG_HTMM
+		del_memcg_from_kmigraterd(memcg, node);
+#endif
 		free_mem_cgroup_per_node_info(memcg, node);
+	}
 	free_percpu(memcg->vmstats_percpu);
 	kfree(memcg);
 }
@@ -7542,13 +7548,18 @@ static ssize_t memcg_htmm_write(struct kernfs_open_file *of,
     else
 	return -EINVAL;
 
+    if (memcg->htmm_enabled)
+	kmigraterd_init();
     for_each_node_state(nid, N_MEMORY) {
 	struct pglist_data *pgdat = NODE_DATA(nid);
 	
-	if (memcg->htmm_enabled)
+	if (memcg->htmm_enabled) {
 	    WRITE_ONCE(pgdat->kswapd_failures, MAX_RECLAIM_RETRIES);
-	else
+	    add_memcg_to_kmigraterd(memcg, nid);
+	} else {
 	    WRITE_ONCE(pgdat->kswapd_failures, 0);
+	    del_memcg_from_kmigraterd(memcg, nid);
+	}
     }
 
     return nbytes;

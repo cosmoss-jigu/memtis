@@ -886,6 +886,9 @@ typedef struct pglist_data {
 
 #ifdef CONFIG_HTMM /* struct pglist_data */
 	struct cftype *memcg_htmm_file; /* max, terminate. */
+	struct task_struct  *kmigraterd;
+	struct list_head    kmigraterd_head;
+	spinlock_t	    kmigraterd_lock;
 #endif
 	/* Fields commonly accessed by the page reclaim scanner */
 

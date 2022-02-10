@@ -50,7 +50,7 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
     attr.sample_period = 10007;
     attr.sample_type = PERF_SAMPLE_IP | PERF_SAMPLE_TID | PERF_SAMPLE_ADDR;
     attr.disabled = 0;
-    attr.exclude_kernel = 0;
+    attr.exclude_kernel = 1;
     attr.precise_ip = 1;
 
     
@@ -157,7 +157,7 @@ static int ksamplingd(void *data)
 		    case PERF_RECORD_SAMPLE:
 			he = (struct htmm_event *)ph;
 			if (!valid_va(he->addr)) {
-			    printk("invalid va: %llx\n", he->addr);
+			    //printk("invalid va: %llx\n", he->addr);
 			    break;
 			}
 
