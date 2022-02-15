@@ -41,6 +41,7 @@ extern int ksamplingd_init(pid_t pid, int node);
 extern void ksamplingd_exit(void);
 
 /* htmm_migrater.c */
+#define HTMM_MIN_FREE_PAGES 256 * 10 // 10MB
 extern void add_memcg_to_kmigraterd(struct mem_cgroup *memcg, int nid);
 extern void del_memcg_from_kmigraterd(struct mem_cgroup *memcg, int nid);
 extern int kmigraterd_init(void);
