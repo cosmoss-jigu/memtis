@@ -1145,6 +1145,9 @@ out:
 static int node_demotion[MAX_NUMNODES] __read_mostly =
 	{[0 ...  MAX_NUMNODES - 1] = NUMA_NO_NODE};
 
+static int node_promotion[MAX_NUMNODES] __read_mostly =
+	{[0 ...  MAX_NUMNODES - 1] = NUMA_NO_NODE};
+
 /**
  * next_demotion_node() - Get the next node in the demotion path
  * @node: The starting node to lookup the next node
@@ -1174,6 +1177,17 @@ int next_demotion_node(int node)
 	return target;
 }
 
+/* can be used when CONFIG_HTMM is set */
+int next_promotion_node(int node)
+{
+    int target;
+
+    rcu_read_lock();
+    target = READ_ONCE(node_promotion[node]);
+    rcu_read_unlock();
+
+    return target;
+}
 /*
  * Obtain the lock on page, remove all ptes and migrate the page
  * to the newly allocated page in newpage.
@@ -3072,8 +3086,10 @@ static void __disable_all_migrate_targets(void)
 {
 	int node;
 
-	for_each_online_node(node)
+	for_each_online_node(node) {
 		node_demotion[node] = NUMA_NO_NODE;
+		node_promotion[node] = NUMA_NO_NODE;
+	}
 }
 
 static void disable_all_migrate_targets(void)
@@ -3120,6 +3136,7 @@ static int establish_migrate_target(int node, nodemask_t *used)
 		return NUMA_NO_NODE;
 
 	node_demotion[node] = migration_target;
+	node_promotion[migration_target] = node;
 
 	return migration_target;
 }

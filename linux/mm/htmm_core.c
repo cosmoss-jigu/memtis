@@ -25,7 +25,7 @@ void htmm_mm_init(struct mm_struct *mm)
     mm->htmm_enabled = true;
 }
 
-static void __prep_transhuge_page_for_htmm(struct page *page)
+void __prep_transhuge_page_for_htmm(struct page *page)
 {
     int i, idx, offset;
     pginfo_t pginfo = { 0, };
@@ -81,6 +81,21 @@ void free_pginfo_pte(struct page *pte)
     ClearPageHtmm(pte);
 }
 
+static void set_lru_cooling(struct mm_struct *mm, int nid)
+{
+    struct mem_cgroup *memcg = get_mem_cgroup_from_mm(mm);
+    struct mem_cgroup_per_node *pn;
+
+    if (!memcg || !memcg->htmm_enabled)
+	return;
+    
+    pn = memcg->nodeinfo[nid];
+    if (!pn)
+	return;
+    
+    WRITE_ONCE(pn->need_cooling, true);
+}
+
 static bool is_hot_page(struct page *page, bool huge)
 {
 
@@ -129,7 +144,7 @@ static void __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,
     pte_t *pte, ptent;
     spinlock_t *ptl;
     pginfo_t *pginfo;
-    struct page *page;
+    struct page *page, *pte_page;
     
     pte = pte_offset_map_lock(vma->vm_mm, pmd, address, &ptl);
     ptent = *pte;
@@ -143,18 +158,26 @@ static void __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,
     if (!PageLRU(page))
 	goto pte_unlock;
 
+    pte_page = virt_to_page((unsigned long)pte);
+    if (!PageHtmm(pte_page))
+	goto pte_unlock;
+
     pginfo = get_pginfo_from_pte(pte);
     if (!pginfo)
 	goto pte_unlock;
 
     pginfo->nr_accesses++;
     if (pginfo->nr_accesses >= htmm_thres_hot) {
+	//printk("page %lx is hot... nr_accesses%lu\n", address, pginfo->nr_accesses);
 	if (!PageActive(page))
 	    move_page_to_active_lru(page);
 	if (transhuge_vma_suitable(vma, address & HPAGE_PMD_MASK)) {
 	    // TODO huge region
 	}
     }
+
+    if (pginfo->nr_accesses >= htmm_thres_cold)
+	set_lru_cooling(vma->vm_mm, page_to_nid(page));
 
 pte_unlock:
     pte_unmap_unlock(pte, ptl);
@@ -170,7 +193,7 @@ static void __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
     if (!pmd || pmd_none(*pmd))
 	return;
     
-    if (!is_swap_pmd(*pmd))
+    if (is_swap_pmd(*pmd))
 	return;
 
     if (!pmd_devmap(*pmd) && unlikely(pmd_bad(*pmd))) {
@@ -237,25 +260,28 @@ static void __update_pginfo(struct vm_area_struct *vma, unsigned long address)
 
 void update_pginfo(pid_t pid, unsigned long address)
 {
-    struct task_struct *p = find_get_task_by_vpid(pid);
+    struct pid *pid_struct = find_get_pid(pid);
+    struct task_struct *p = pid_task(pid_struct, PIDTYPE_PID);
     struct mm_struct *mm = p ? p->mm : NULL;
     struct vm_area_struct *vma; 
 
     if (!mm)
-	return;
+	goto put_task;
 
     if (!mmap_read_trylock(mm))
-	return;
+	goto put_task;
 
     vma = find_vma(mm, address);
     if (unlikely(!vma))
-	return;
+	goto mmap_unlock;
     
     if (!vma->vm_mm || !vma_migratable(vma) ||
 	(vma->vm_file && (vma->vm_flags & (VM_READ | VM_WRITE)) == (VM_READ)))
-	return;
+	goto mmap_unlock;
     
     __update_pginfo(vma, address);
+mmap_unlock:
     mmap_read_unlock(mm);
-    put_task_struct(p);
+put_task:
+    put_pid(pid_struct);
 }

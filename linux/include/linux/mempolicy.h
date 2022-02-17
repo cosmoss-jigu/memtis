@@ -188,6 +188,8 @@ extern bool numa_demotion_enabled;
 #ifdef CONFIG_HTMM
 extern unsigned int htmm_thres_hot;
 extern unsigned int htmm_thres_cold;
+extern unsigned int htmm_demotion_period_in_ms;
+extern unsigned int htmm_promotion_period_in_ms;
 #endif
 static inline bool mpol_is_preferred_many(struct mempolicy *pol)
 {

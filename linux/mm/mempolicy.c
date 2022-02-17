@@ -102,6 +102,9 @@
 #include <linux/mmu_notifier.h>
 #include <linux/printk.h>
 #include <linux/swapops.h>
+#ifdef CONFIG_HTMM
+#include <linux/htmm.h>
+#endif
 
 #include <asm/tlbflush.h>
 #include <linux/uaccess.h>
@@ -2101,6 +2104,37 @@ struct page *alloc_pages_vma(gfp_t gfp, int order, struct vm_area_struct *vma,
 		goto out;
 	}
 
+#ifdef CONFIG_HTMM /* alloc_pages_vma() */
+	if (vma->vm_mm && vma->vm_mm->htmm_enabled) {
+	    struct task_struct *p = current;
+	    struct mem_cgroup *memcg = mem_cgroup_from_task(p);
+	    unsigned long max_nr_pages;
+	    int nid = pol->mode == MPOL_PREFERRED ? first_node(pol->nodes) : node;
+	    unsigned int nr_pages = 1U << order;
+	    pg_data_t *pgdat = NODE_DATA(nid);
+	    
+	    if (!memcg || !memcg->htmm_enabled)
+		goto use_default_pol;
+
+	    max_nr_pages = READ_ONCE(memcg->nodeinfo[nid]->max_nr_base_pages);
+	    if (max_nr_pages == ULONG_MAX)
+		goto use_default_pol;
+
+	    while (max_nr_pages <= (get_nr_lru_pages_node(memcg, pgdat) + nr_pages)) {
+		if ((nid = next_demotion_node(nid)) == NUMA_NO_NODE) {
+		    nid = first_memory_node;
+		    break;
+		}
+		max_nr_pages = READ_ONCE(memcg->nodeinfo[nid]->max_nr_base_pages);
+		pgdat = NODE_DATA(nid);
+	    }
+	    
+	    mpol_cond_put(pol);
+	    page = __alloc_pages_node(nid, gfp | __GFP_THISNODE, order);
+	    goto out;
+	}
+use_default_pol:
+#endif
 	if (pol->mode == MPOL_PREFERRED_MANY) {
 		page = alloc_pages_preferred_many(gfp, order, node, pol);
 		mpol_cond_put(pol);
@@ -2976,9 +3010,11 @@ void mpol_to_str(char *buffer, int maxlen, struct mempolicy *pol)
 }
 
 bool numa_demotion_enabled = false;
-#ifdef CONFIG_HTMM
+#ifdef CONFIG_HTMM /* sysfs htmm */
 unsigned int htmm_thres_hot = 3;
 unsigned int htmm_thres_cold = 7;
+unsigned int htmm_demotion_period_in_ms = 100;
+unsigned int htmm_promotion_period_in_ms = 100;
 #endif
 
 #ifdef CONFIG_SYSFS
@@ -3089,9 +3125,62 @@ static struct kobj_attribute htmm_thres_cold_attr =
 	__ATTR(htmm_thres_cold, 0644, htmm_thres_cold_show,
 	       htmm_thres_cold_store);
 
+static ssize_t htmm_demotion_period_show(struct kobject *kobj,
+				   struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%u\n", htmm_demotion_period_in_ms);
+}
+
+static ssize_t htmm_demotion_period_store(struct kobject *kobj,
+				    struct kobj_attribute *attr,
+				    const char *buf, size_t count)
+{
+	int err;
+	unsigned int thres;
+
+	err = kstrtouint(buf, 10, &thres);
+	if (err)
+		return err;
+
+	WRITE_ONCE(htmm_demotion_period_in_ms, thres);
+	return count;
+}
+
+static struct kobj_attribute htmm_demotion_period_attr =
+	__ATTR(htmm_demotion_period_in_ms, 0644, htmm_demotion_period_show,
+	       htmm_demotion_period_store);
+
+static ssize_t htmm_promotion_period_show(struct kobject *kobj,
+				   struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%u\n", htmm_promotion_period_in_ms);
+}
+
+static ssize_t htmm_promotion_period_store(struct kobject *kobj,
+				    struct kobj_attribute *attr,
+				    const char *buf, size_t count)
+{
+	int err;
+	unsigned int thres;
+
+	err = kstrtouint(buf, 10, &thres);
+	if (err)
+		return err;
+
+	WRITE_ONCE(htmm_promotion_period_in_ms, thres);
+	return count;
+}
+
+static struct kobj_attribute htmm_promotion_period_attr =
+	__ATTR(htmm_promotion_period_in_ms, 0644, htmm_promotion_period_show,
+	       htmm_promotion_period_store);
+
+
 static struct attribute *htmm_attrs[] = {
 	&htmm_thres_hot_attr.attr,
 	&htmm_thres_cold_attr.attr,
+	&htmm_demotion_period_attr.attr,
+	&htmm_promotion_period_attr.attr,
 	NULL,
 };
 

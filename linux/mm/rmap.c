@@ -899,6 +899,83 @@ int page_referenced(struct page *page,
 	return pra.referenced;
 }
 
+#ifdef CONFIG_HTMM
+struct htmm_cooling_arg {
+    bool page_is_hot;
+    struct mem_cgroup *memcg;
+};
+
+static bool cooling_page_one(struct page *page, struct vm_area_struct *vma,
+	unsigned long address, void *arg)
+{
+    struct htmm_cooling_arg *hca = arg;
+    struct page_vma_mapped_walk pvmw = {
+	.page = page,
+	.vma = vma,
+	.address = address,
+    };
+    pginfo_t *pginfo;
+
+    while (page_vma_mapped_walk(&pvmw)) {
+	address = pvmw.address;
+	page = pvmw.page;
+
+	if (pvmw.pte) {
+	    struct page *pte_page;
+	    pte_t *pte = pvmw.pte;
+
+	    pte_page = virt_to_page((unsigned long)pte);
+	    if (!PageHtmm(pte_page))
+		continue;
+
+	    pginfo = get_pginfo_from_pte(pte);
+	    if (!pginfo)
+		continue;
+
+	    pginfo->nr_accesses >>= 1;
+	    if (pginfo->nr_accesses >= htmm_thres_hot)
+		hca->page_is_hot = true;
+	} else if (pvmw.pmd) {
+	    if (pmd_trans_huge(*pvmw.pmd) || pmd_devmap(*pvmw.pmd)) {
+		VM_BUG_ON_PAGE(!PageCompound(page), page);
+
+		/* TODO: cooling huge pages */
+
+	    }
+	}
+    }
+
+    return true;
+}
+
+/**
+ * cooling_page - cooling page and return true if the page is still hot page
+ */
+bool cooling_page(struct page *page, struct mem_cgroup *memcg)
+{
+    struct htmm_cooling_arg hca = {
+	.page_is_hot = false,
+	.memcg = memcg,
+    };
+    struct rmap_walk_control rwc = {
+	.rmap_one = cooling_page_one,
+	.arg = (void *)&hca,
+    };
+
+    if (!memcg || !memcg->htmm_enabled)
+	return false;
+
+    if (!PageAnon(page) || PageKsm(page))
+	return false;
+
+    if (!page_mapped(page))
+	return false;
+
+    rmap_walk(page, &rwc);
+    return hca.page_is_hot;
+}
+#endif
+
 static bool page_mkclean_one(struct page *page, struct vm_area_struct *vma,
 			    unsigned long address, void *arg)
 {

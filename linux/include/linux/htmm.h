@@ -3,6 +3,7 @@
 
 #define BUFFER_SIZE	512 /* 1MB */
 #define CPUS_PER_SOCKET 20
+#define MAX_MIGRATION_RATE_IN_MBPS  100 /* 100MB per sec */
 
 
 /* pebs events */
@@ -32,6 +33,7 @@ enum events {
 
 /* htmm_core.c */
 extern void htmm_mm_init(struct mm_struct *mm);
+extern void __prep_transhuge_page_for_htmm(struct page *page);
 extern void prep_transhuge_page_for_htmm(struct vm_area_struct *vma,
 					 struct page *page);
 extern void update_pginfo(pid_t pid, unsigned long address);
@@ -42,6 +44,7 @@ extern void ksamplingd_exit(void);
 
 /* htmm_migrater.c */
 #define HTMM_MIN_FREE_PAGES 256 * 10 // 10MB
+extern unsigned long get_nr_lru_pages_node(struct mem_cgroup *memcg, pg_data_t *pgdat);
 extern void add_memcg_to_kmigraterd(struct mem_cgroup *memcg, int nid);
 extern void del_memcg_from_kmigraterd(struct mem_cgroup *memcg, int nid);
 extern int kmigraterd_init(void);

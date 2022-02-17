@@ -190,7 +190,9 @@ static inline void page_dup_rmap(struct page *page, bool compound)
  */
 int page_referenced(struct page *, int is_locked,
 			struct mem_cgroup *memcg, unsigned long *vm_flags);
-
+#ifdef CONFIG_HTMM
+bool cooling_page(struct page *page, struct mem_cgroup *memcg);
+#endif
 void try_to_migrate(struct page *page, enum ttu_flags flags);
 void try_to_unmap(struct page *, enum ttu_flags flags);
 
@@ -294,6 +296,13 @@ static inline int page_referenced(struct page *page, int is_locked,
 static inline void try_to_unmap(struct page *page, enum ttu_flags flags)
 {
 }
+
+#ifdef CONFIG_HTMM
+static inline bool cooling_page(struct page *page, struct mem_cgroup *memcg)
+{
+    return false;
+}
+#endif
 
 static inline int page_mkclean(struct page *page)
 {

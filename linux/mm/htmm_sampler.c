@@ -3,6 +3,7 @@
  */
 #include <linux/kthread.h>
 #include <linux/memcontrol.h>
+#include <linux/sched.h>
 #include <linux/perf_event.h>
 
 #include "../kernel/events/internal.h"
@@ -151,7 +152,7 @@ static int ksamplingd(void *data)
 		offset = READ_ONCE(up->data_tail);
 		pg_index = (offset >> page_shift) & (rb->nr_pages - 1);
 		offset &= (1 << page_shift) - 1;
-	
+
 		ph = (void*)(rb->data_pages[pg_index] + offset);
 		switch (ph->type) {
 		    case PERF_RECORD_SAMPLE:
@@ -180,6 +181,7 @@ static int ksamplingd(void *data)
 		WRITE_ONCE(up->data_tail, up->data_tail + ph->size);
 	    }
 	}
+	cond_resched();
     }
 
     printk("nr_sampled: %llu, nr_throttled: %llu, nr_unknown: %llu\n", nr_sampled, nr_throttled, nr_unknown);

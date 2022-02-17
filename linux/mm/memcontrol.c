@@ -5129,6 +5129,7 @@ static int alloc_mem_cgroup_per_node_info(struct mem_cgroup *memcg, int node)
 #ifdef CONFIG_HTMM /* alloc_mem_cgroup_per_node_info() */
 	pn->max_nr_base_pages = ULONG_MAX;
 	INIT_LIST_HEAD(&pn->kmigraterd_list);
+	pn->need_cooling = false;
 #endif
 
 	memcg->nodeinfo[node] = pn;

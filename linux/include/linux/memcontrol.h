@@ -144,6 +144,7 @@ struct mem_cgroup_per_node {
 #ifdef CONFIG_HTMM /* struct mem_cgroup_per_node */
 	unsigned long		max_nr_base_pages; /* Set by "max_at_node" param */
 	struct list_head	kmigraterd_list;
+	bool			need_cooling;
 #endif
 	struct mem_cgroup_reclaim_iter	iter;
 
