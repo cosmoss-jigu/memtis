@@ -26,4 +26,4 @@ elif [ "x$3" == "xdisable" ]; then
 fi
 
 echo "'set_htmm_memcg.sh' Invalid parameters...."
-echo "./set_htmm_memcg.sh [cgroup name] [bash pid] [\"enabled\" or \"disable\"]"
+echo "./set_htmm_memcg.sh [cgroup name] [bash pid] [\"enable\" or \"disable\"]"
