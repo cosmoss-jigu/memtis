@@ -36,6 +36,8 @@ extern void htmm_mm_init(struct mm_struct *mm);
 extern void __prep_transhuge_page_for_htmm(struct page *page);
 extern void prep_transhuge_page_for_htmm(struct vm_area_struct *vma,
 					 struct page *page);
+extern void copy_transhuge_pginfo(struct page *page,
+				  struct page *newpage);
 extern void update_pginfo(pid_t pid, unsigned long address);
 
 /* htmm_sampler.c */

@@ -1239,6 +1239,12 @@ static int free_tail_pages_check(struct page *head_page, struct page *page)
 		 */
 		break;
 	default:
+#ifdef CONFIG_HTMM
+		if (PageHtmm(page)) {
+		    ClearPageHtmm(page);
+		    break;
+		}
+#endif
 		if (page->mapping != TAIL_MAPPING) {
 			bad_page(page, "corrupted mapping in tail page");
 			goto out;

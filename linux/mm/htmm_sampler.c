@@ -3,6 +3,7 @@
  */
 #include <linux/kthread.h>
 #include <linux/memcontrol.h>
+#include <linux/mempolicy.h>
 #include <linux/sched.h>
 #include <linux/perf_event.h>
 

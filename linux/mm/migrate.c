@@ -50,6 +50,7 @@
 #include <linux/ptrace.h>
 #include <linux/oom.h>
 #include <linux/memory.h>
+#include <linux/htmm.h>
 
 #include <asm/tlbflush.h>
 
@@ -607,6 +608,10 @@ void migrate_page_states(struct page *newpage, struct page *page)
 		SetPageReadahead(newpage);
 
 	copy_page_owner(page, newpage);
+#ifdef CONFIG_HTMM
+	if (PageTransHuge(page))
+	    copy_transhuge_pginfo(page, newpage);
+#endif
 
 	if (!PageHuge(page))
 		mem_cgroup_migrate(page, newpage);

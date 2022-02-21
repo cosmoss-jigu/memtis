@@ -35,13 +35,14 @@ void __prep_transhuge_page_for_htmm(struct page *page)
     page[3].total_accesses = 0;
     page[3].cur_hv = 0;
     page[3].prev_hv = 0;
-
+    SetPageHtmm(&page[3]);
     /* fourth~ tail pages */
     for (i = 0; i < HPAGE_PMD_NR; i++) {
 	idx = 4 + i / 8;
 	offset = i % 8;
 	
 	page[idx].compound_pginfo[offset] = pginfo;
+	SetPageHtmm(&page[idx]);
     }
 }
 
@@ -54,13 +55,41 @@ void prep_transhuge_page_for_htmm(struct vm_area_struct *vma,
 	__prep_transhuge_page_for_htmm(page);
 }
 
+void copy_transhuge_pginfo(struct page *page,
+			   struct page *newpage)
+{
+    int i, idx, offset;
+    pginfo_t zero_pginfo = { 0 };
+
+    VM_BUG_ON_PAGE(!PageCompound(page), page);
+    VM_BUG_ON_PAGE(!PageCompound(newpage), newpage);
+
+    if (!PageHtmm(&page[3]))
+	return;
+
+    newpage[3].hot_utils = page[3].hot_utils;
+    newpage[3].total_accesses = page[3].total_accesses;
+    newpage[3].cur_hv = page[3].cur_hv;
+    newpage[3].prev_hv = page[3].prev_hv;
+    SetPageHtmm(&newpage[3]);
+
+    for (i = 0; i < HPAGE_PMD_NR; i++) {
+	idx = 4 + i / 8;
+	offset = i % 8;
+
+	newpage[idx].compound_pginfo[offset] = page[idx].compound_pginfo[offset];
+	page[idx].compound_pginfo[offset] = zero_pginfo;
+	SetPageHtmm(&newpage[idx]);
+    }
+}
+
 pginfo_t *get_compound_pginfo(struct page *page, unsigned long address)
 {
     int idx, offset;
     VM_BUG_ON_PAGE(!PageCompound(page), page);
     
-    idx = 4 + (address & ~HPAGE_PMD_MASK) / 8;
-    offset = (address & ~HPAGE_PMD_MASK) % 8;
+    idx = 4 + ((address & ~HPAGE_PMD_MASK) >> PAGE_SHIFT) / 8;
+    offset = ((address & ~HPAGE_PMD_MASK) >> PAGE_SHIFT) % 8;
 
     return &(page[idx].compound_pginfo[offset]);
 }
@@ -96,10 +125,9 @@ static void set_lru_cooling(struct mm_struct *mm, int nid)
     WRITE_ONCE(pn->need_cooling, true);
 }
 
-static bool is_hot_page(struct page *page, bool huge)
+static bool is_hot_huge_page(struct page *page)
 {
-
-    return false;
+    return page->total_accesses >= htmm_thres_hot;
 }
 
 static void move_page_to_active_lru(struct page *page)
@@ -107,12 +135,12 @@ static void move_page_to_active_lru(struct page *page)
     struct lruvec *lruvec;
     LIST_HEAD(l_active);
 
-    if (PageActive(page))
-	return;
-
     lruvec = mem_cgroup_page_lruvec(page);
     
     spin_lock_irq(&lruvec->lru_lock);
+    if (PageActive(page))
+	goto lru_unlock;
+
     if (!__isolate_lru_page_prepare(page, 0))
 	goto lru_unlock;
 
@@ -197,7 +225,7 @@ static void __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
     if (is_swap_pmd(*pmd))
 	return;
 
-    if (!pmd_devmap(*pmd) && unlikely(pmd_bad(*pmd))) {
+    if (!pmd_trans_huge(*pmd) && !pmd_devmap(*pmd) && unlikely(pmd_bad(*pmd))) {
 	pmd_clear_bad(pmd);
 	return;
     }
@@ -217,13 +245,18 @@ static void __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
 	page = pmd_page(pmdval);
 	if (!page || !PageLRU(page) || PageLocked(page))
 	    goto pmd_unlock;
+
+	if (compound_head(page) != page) {
+	    printk("page is not compound_head\n");
+	    goto pmd_unlock;
+	}
 	
 	pginfo = get_compound_pginfo(page, address);
 	meta_page = get_meta_page(page);
 
 	pginfo->nr_accesses++;
 	meta_page->total_accesses++;
-	if (is_hot_page(page, true)) {
+	if (is_hot_huge_page(meta_page)) {
 	    if (!PageActive(page)) {
 		move_page_to_active_lru(page);
 		meta_page->hot_utils++;
