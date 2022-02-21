@@ -169,8 +169,9 @@ static void __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,
     pginfo->nr_accesses++;
     if (pginfo->nr_accesses >= htmm_thres_hot) {
 	//printk("page %lx is hot... nr_accesses%lu\n", address, pginfo->nr_accesses);
-	if (!PageActive(page))
+	if (!PageActive(page)) {
 	    move_page_to_active_lru(page);
+	}
 	if (transhuge_vma_suitable(vma, address & HPAGE_PMD_MASK)) {
 	    // TODO huge region
 	}

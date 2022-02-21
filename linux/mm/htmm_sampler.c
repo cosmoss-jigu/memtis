@@ -48,7 +48,7 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
     attr.size = sizeof(struct perf_event_attr);
     attr.config = config;
     attr.config1 = config1;
-    attr.sample_period = 10007;
+    attr.sample_period = htmm_sample_period;
     attr.sample_type = PERF_SAMPLE_IP | PERF_SAMPLE_TID | PERF_SAMPLE_ADDR;
     attr.disabled = 0;
     attr.exclude_kernel = 1;
@@ -163,6 +163,7 @@ static int ksamplingd(void *data)
 			}
 
 			update_pginfo(he->pid, he->addr);
+			count_vm_event(HTMM_NR_SAMPLED);
 			nr_sampled++;
 			break;
 		    case PERF_RECORD_THROTTLE:

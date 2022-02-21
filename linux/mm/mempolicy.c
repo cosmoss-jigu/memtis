@@ -3011,7 +3011,8 @@ void mpol_to_str(char *buffer, int maxlen, struct mempolicy *pol)
 
 bool numa_demotion_enabled = false;
 #ifdef CONFIG_HTMM /* sysfs htmm */
-unsigned int htmm_thres_hot = 3;
+unsigned int htmm_sample_period = 10007;
+unsigned int htmm_thres_hot = 2;
 unsigned int htmm_thres_cold = 7;
 unsigned int htmm_demotion_period_in_ms = 100;
 unsigned int htmm_promotion_period_in_ms = 100;
@@ -3075,6 +3076,31 @@ delete_obj:
 }
 subsys_initcall(numa_init_sysfs);
 #ifdef CONFIG_HTMM
+static ssize_t htmm_sample_period_show(struct kobject *kobj,
+				   struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%u\n", htmm_sample_period);
+}
+
+static ssize_t htmm_sample_period_store(struct kobject *kobj,
+				    struct kobj_attribute *attr,
+				    const char *buf, size_t count)
+{
+	int err;
+	unsigned int period;
+
+	err = kstrtouint(buf, 10, &period);
+	if (err)
+		return err;
+
+	WRITE_ONCE(htmm_sample_period, period);
+	return count;
+}
+
+static struct kobj_attribute htmm_sample_period_attr =
+	__ATTR(htmm_sample_period, 0644, htmm_sample_period_show,
+	       htmm_sample_period_store);
+
 static ssize_t htmm_thres_hot_show(struct kobject *kobj,
 				   struct kobj_attribute *attr, char *buf)
 {
@@ -3177,6 +3203,7 @@ static struct kobj_attribute htmm_promotion_period_attr =
 
 
 static struct attribute *htmm_attrs[] = {
+	&htmm_sample_period_attr.attr,
 	&htmm_thres_hot_attr.attr,
 	&htmm_thres_cold_attr.attr,
 	&htmm_demotion_period_attr.attr,

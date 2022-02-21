@@ -109,11 +109,60 @@ static bool need_toptier_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg)
 	if (target_nid == NUMA_NO_NODE)
 	    return false;
 
-	target_pgdat= NODE_DATA(target_nid);
+	target_pgdat = NODE_DATA(target_nid);
 	if (need_lowertier_promotion(target_pgdat, memcg))
 	    return true;
     }
 
+    return false;
+}
+
+static unsigned long node_free_pages(pg_data_t *pgdat)
+{
+    int z;
+    long free_pages;
+    long total = 0;
+
+    for (z = pgdat->nr_zones - 1; z >= 0; z--) {
+	struct zone *zone = pgdat->node_zones + z;
+	long nr_high_wmark_pages;
+
+	if (!populated_zone(zone))
+	    continue;
+
+	free_pages = zone_page_state(zone, NR_FREE_PAGES);
+	free_pages -= zone->nr_reserved_highatomic;
+	free_pages -= zone->lowmem_reserve[ZONE_MOVABLE];
+
+	nr_high_wmark_pages = high_wmark_pages(zone);
+	if (free_pages >= nr_high_wmark_pages)
+	    total += (free_pages - nr_high_wmark_pages);
+    }
+    return (unsigned long)total;
+}
+
+static bool promotion_available(int target_nid, struct mem_cgroup *memcg,
+	unsigned long *nr_to_promote)
+{
+    pg_data_t *pgdat;
+    unsigned long max_nr_pages, cur_nr_pages;
+
+    if (target_nid == NUMA_NO_NODE)
+	return false;
+    
+    pgdat = NODE_DATA(target_nid);
+
+    cur_nr_pages = get_nr_lru_pages_node(memcg, pgdat);
+    max_nr_pages = memcg->nodeinfo[target_nid]->max_nr_base_pages;
+    
+    if (max_nr_pages == ULONG_MAX) {
+	*nr_to_promote = node_free_pages(pgdat);
+	return true;
+    }
+    else if (cur_nr_pages < max_nr_pages) {
+	*nr_to_promote = max_nr_pages - cur_nr_pages;
+	return true;
+    }
     return false;
 }
 
@@ -230,6 +279,11 @@ static unsigned long migrate_page_list(struct list_head *migrate_list,
     migrate_pages(migrate_list, alloc_migrate_page, NULL,
 	    target_nid, MIGRATE_ASYNC, MR_NUMA_MISPLACED, &nr_succeeded);
 
+    if (promotion)
+	count_vm_events(HTMM_NR_PROMOTED, nr_succeeded);
+    else
+	count_vm_events(HTMM_NR_DEMOTED, nr_succeeded);
+
     return nr_succeeded;
 }
 
@@ -277,6 +331,49 @@ keep:
     return nr_reclaimed;
 }
 
+static unsigned long promote_page_list(struct list_head *page_list,
+	pg_data_t *pgdat)
+{
+    LIST_HEAD(promote_pages);
+    LIST_HEAD(ret_pages);
+    unsigned long nr_promoted = 0;
+
+    cond_resched();
+
+    while (!list_empty(page_list)) {
+	struct page *page;
+
+	page = lru_to_page(page_list);
+	list_del(&page->lru);
+
+	if (!trylock_page(page))
+	    goto __keep;
+	if (!PageActive(page))
+	    goto __keep_locked;
+	if (unlikely(!page_evictable(page)))
+	    goto __keep_locked;
+	if (PageWriteback(page))
+	    goto __keep_locked;
+	if (PageTransHuge(page) && !thp_migration_supported())
+	    goto __keep_locked;
+
+	list_add(&page->lru, &promote_pages);
+	unlock_page(page);
+	continue;
+__keep_locked:
+	unlock_page(page);
+__keep:
+	list_add(&page->lru, &ret_pages);
+    }
+
+    nr_promoted = migrate_page_list(&promote_pages, pgdat, true);
+    if (!list_empty(&promote_pages))
+	list_splice(&promote_pages, page_list);
+
+    list_splice(&ret_pages, page_list);
+    return nr_promoted;
+}
+
 static unsigned long demote_inactive_list(unsigned long nr_to_scan,
 	struct lruvec *lruvec, enum lru_list lru)
 {
@@ -308,6 +405,36 @@ static unsigned long demote_inactive_list(unsigned long nr_to_scan,
     return nr_reclaimed;
 }
 
+static unsigned long promote_active_list(unsigned long nr_to_scan,
+	struct lruvec *lruvec, enum lru_list lru)
+{
+    LIST_HEAD(page_list);
+    pg_data_t *pgdat = lruvec_pgdat(lruvec);
+    unsigned long nr_taken, nr_promoted;
+    
+    lru_add_drain();
+
+    spin_lock_irq(&lruvec->lru_lock);
+    nr_taken = isolate_lru_pages(nr_to_scan, lruvec, lru, &page_list, 0);
+    __mod_node_page_state(pgdat, NR_ISOLATED_ANON, nr_taken);
+    spin_unlock_irq(&lruvec->lru_lock);
+
+    if (nr_taken == 0)
+	return 0;
+
+    nr_promoted = promote_page_list(&page_list, pgdat);
+
+    spin_lock_irq(&lruvec->lru_lock);
+    move_pages_to_lru(lruvec, &page_list);
+    __mod_node_page_state(pgdat, NR_ISOLATED_ANON, -nr_taken);
+    spin_unlock_irq(&lruvec->lru_lock);
+
+    mem_cgroup_uncharge_list(&page_list);
+    free_unref_page_list(&page_list);
+
+    return nr_promoted;
+}
+
 static unsigned long demote_lruvec(unsigned long nr_to_reclaim, short priority,
 	pg_data_t *pgdat, struct lruvec *lruvec)
 {
@@ -327,6 +454,20 @@ static unsigned long demote_lruvec(unsigned long nr_to_reclaim, short priority,
     }
 
     return nr_reclaimed;
+}
+
+static unsigned long promote_lruvec(unsigned long nr_to_promote, short priority,
+	pg_data_t *pgdat, struct lruvec *lruvec)
+{
+    enum lru_list lru;
+    unsigned long nr_promoted = 0, nr;
+    
+    nr = nr_to_promote >> priority;
+    if (nr) {
+	nr_promoted += promote_active_list(nr, lruvec, LRU_ACTIVE_ANON);
+    }
+
+    return nr_promoted;
 }
 
 static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
@@ -355,6 +496,28 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
     } while (priority);
 
     return nr_reclaimed;
+}
+
+static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
+{
+    struct lruvec *lruvec = mem_cgroup_lruvec(memcg, pgdat);
+    unsigned long nr_to_promote, nr_promoted = 0;
+    short priority = DEF_PRIORITY;
+
+    if (!promotion_available(next_promotion_node(pgdat->node_id), memcg, &nr_to_promote))
+	return 0;
+
+    nr_to_promote = min(nr_to_promote,
+		    lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES));
+
+    do {
+	nr_promoted += promote_lruvec(nr_to_promote, priority, pgdat, lruvec);
+	if (nr_promoted >= nr_to_promote)
+	    break;
+	priority--;
+    } while (priority);
+    
+    return nr_promoted;
 }
 
 static void cooling_active_list(unsigned long nr_to_scan,
@@ -416,13 +579,15 @@ static void cooling_active_list(unsigned long nr_to_scan,
 
 static void cooling_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
 {
-    unsigned long nr_to_scan, nr_scanned;
+    unsigned long nr_to_scan, nr_scanned = 0;
     struct lruvec *lruvec = mem_cgroup_lruvec(memcg, pgdat);
 
     nr_to_scan = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
     do {
 	unsigned long scan = nr_to_scan >> 3; /* 12.5% */
-	
+
+	if (!scan)
+	    scan = nr_to_scan;
 	/* limits the num. of scanned pages to reduce the lock holding time */
 	cooling_active_list(scan, lruvec, LRU_ACTIVE_ANON);
 	nr_scanned += scan;
@@ -482,7 +647,7 @@ static int kmigraterd_demotion(pg_data_t *pgdat)
 
 	/* performs cooling */
 	if (need_lru_cooling(pn)) {
-	    cooling_node(pgdat, memcg);
+	    //cooling_node(pgdat, memcg);
 	}
 
 	/* default: wait 100 ms */
@@ -521,9 +686,15 @@ static int kmigraterd_promotion(pg_data_t *pgdat)
 	}
 
 	/* promotes hot pages to fast memory node */
+	if (need_lowertier_promotion(pgdat, memcg)) {
+	    promote_node(pgdat, memcg);
+	}
 	
+	if (need_lru_cooling(pn)) {
+	    //cooling_node(pgdat, memcg);
+	}
 	
-	msleep_interruptible(100);
+	msleep_interruptible(htmm_promotion_period_in_ms);
     }
 
     return 0;
