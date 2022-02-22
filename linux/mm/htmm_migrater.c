@@ -581,6 +581,7 @@ static void cooling_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
 {
     unsigned long nr_to_scan, nr_scanned = 0;
     struct lruvec *lruvec = mem_cgroup_lruvec(memcg, pgdat);
+    struct mem_cgroup_per_node *pn = memcg->nodeinfo[pgdat->node_id];
 
     nr_to_scan = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
     do {
@@ -596,6 +597,7 @@ static void cooling_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
     /* active file list */
     cooling_active_list(lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES),
 					lruvec, LRU_ACTIVE_FILE);
+    WRITE_ONCE(pn->need_cooling, false);
 }
 
 static struct mem_cgroup_per_node *next_memcg_cand(pg_data_t *pgdat)
@@ -625,6 +627,11 @@ static int kmigraterd_demotion(pg_data_t *pgdat)
 	if (kthread_should_stop())
 	    break;
 
+	if (htmm_mode == HTMM_NO_MIG) {
+	    msleep_interruptible(1000);
+	    continue;
+	}
+
 	pn = next_memcg_cand(pgdat);
 	if (!pn) {
 	    msleep_interruptible(1000);
@@ -647,7 +654,7 @@ static int kmigraterd_demotion(pg_data_t *pgdat)
 
 	/* performs cooling */
 	if (need_lru_cooling(pn)) {
-	    //cooling_node(pgdat, memcg);
+	    cooling_node(pgdat, memcg);
 	}
 
 	/* default: wait 100 ms */
@@ -670,7 +677,12 @@ static int kmigraterd_promotion(pg_data_t *pgdat)
 
 	if (kthread_should_stop())
 	    break;
-	
+
+	if (htmm_mode == HTMM_NO_MIG) {
+	    msleep_interruptible(1000);
+	    continue;
+	}
+
 	pn = next_memcg_cand(pgdat);
 	if (!pn) {
 	    msleep_interruptible(1000);
@@ -691,7 +703,7 @@ static int kmigraterd_promotion(pg_data_t *pgdat)
 	}
 	
 	if (need_lru_cooling(pn)) {
-	    //cooling_node(pgdat, memcg);
+	    cooling_node(pgdat, memcg);
 	}
 	
 	msleep_interruptible(htmm_promotion_period_in_ms);

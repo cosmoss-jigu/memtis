@@ -110,19 +110,61 @@ void free_pginfo_pte(struct page *pte)
     ClearPageHtmm(pte);
 }
 
-static void set_lru_cooling(struct mm_struct *mm, int nid)
+static bool reach_cooling_thres(pginfo_t *pginfo, struct page *meta_page, bool hugepage)
+{
+    if (hugepage) {
+	if (htmm_mode == HTMM_BASELINE)
+	    return meta_page->total_accesses >= htmm_thres_cold;
+	else /* will be updated */
+	    return false;
+    }
+
+    return pginfo->nr_accesses >= htmm_thres_cold;
+}
+
+static bool need_lru_cooling(struct mm_struct *mm,
+			     struct page *page)
+{
+    struct mem_cgroup *memcg = get_mem_cgroup_from_mm(mm);
+    unsigned long cur, next, now = jiffies;
+    unsigned long nr_active_pages = 0;
+    int nid;
+
+    cur = memcg->htmm_next_cooling;
+    if (time_before(now, cur))
+	return false;
+    
+    for_each_node_state(nid, N_MEMORY) {
+	struct lruvec *lruvec = mem_cgroup_lruvec(memcg, NODE_DATA(nid));
+	nr_active_pages += lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
+    }
+    if (nr_active_pages <= memcg->max_nr_dram_pages)
+	return false;
+    
+    /* need cooling */
+    next = now + msecs_to_jiffies(htmm_min_cooling_interval);
+    if (cmpxchg(&memcg->htmm_next_cooling, cur, next) != cur)
+	return false;
+
+    return true;
+}
+
+static void set_lru_cooling(struct mm_struct *mm)
 {
     struct mem_cgroup *memcg = get_mem_cgroup_from_mm(mm);
     struct mem_cgroup_per_node *pn;
+    int nid;
 
     if (!memcg || !memcg->htmm_enabled)
 	return;
     
-    pn = memcg->nodeinfo[nid];
-    if (!pn)
-	return;
+    for_each_node_state(nid, N_MEMORY) {
+	pn = memcg->nodeinfo[nid];
+	if (!pn)
+	    continue;
     
-    WRITE_ONCE(pn->need_cooling, true);
+	WRITE_ONCE(pn->need_cooling, true);
+    }
 }
 
 static bool is_hot_huge_page(struct page *page)
@@ -205,8 +247,8 @@ static void __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,
 	}
     }
 
-    if (pginfo->nr_accesses >= htmm_thres_cold)
-	set_lru_cooling(vma->vm_mm, page_to_nid(page));
+    if (reach_cooling_thres(pginfo, NULL, false) && need_lru_cooling(vma->vm_mm, page))
+	set_lru_cooling(vma->vm_mm);
 
 pte_unlock:
     pte_unmap_unlock(pte, ptl);
@@ -262,6 +304,10 @@ static void __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
 		meta_page->hot_utils++;
 	    }
 	}
+
+	if (reach_cooling_thres(NULL, meta_page, true) &&
+		need_lru_cooling(vma->vm_mm, page))
+	    set_lru_cooling(vma->vm_mm);
 	
 pmd_unlock:
 	spin_unlock(ptl);

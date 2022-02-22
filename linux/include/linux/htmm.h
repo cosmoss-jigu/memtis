@@ -14,6 +14,11 @@
 #define STLB_MISS_STORES    0x12d0
 #define STLB_MISS_LOADS	    0x11d0
 
+/* tmm option */
+#define HTMM_NO_MIG	    0x0
+#define	HTMM_BASELINE	    0x1
+#define HTMM_HUGEPAGE_OPT   0x2
+
 struct htmm_event {
     struct perf_event_header header;
     __u64 ip;

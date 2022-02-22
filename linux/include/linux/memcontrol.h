@@ -353,6 +353,8 @@ struct mem_cgroup {
 
 #ifdef CONFIG_HTMM /* struct mem_cgroup */
 	bool htmm_enabled;
+	unsigned long max_nr_dram_pages;
+	unsigned long htmm_next_cooling;
 #endif
 
 	struct mem_cgroup_per_node *nodeinfo[];

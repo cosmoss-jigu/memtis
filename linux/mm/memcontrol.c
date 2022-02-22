@@ -5227,6 +5227,8 @@ static struct mem_cgroup *mem_cgroup_alloc(void)
 #endif
 #ifdef CONFIG_HTMM /* mem_cgroup_alloc() */
 	memcg->htmm_enabled = false;
+	memcg->max_nr_dram_pages = ULONG_MAX;
+	memcg->htmm_next_cooling = jiffies + msecs_to_jiffies(1000);
 #endif
 	idr_replace(&mem_cgroup_idr, memcg, memcg->id.id);
 	return memcg;
@@ -7614,6 +7616,13 @@ static ssize_t memcg_per_node_max_write(struct kernfs_open_file *of,
 	return err;
 
     xchg(&memcg->nodeinfo[nid]->max_nr_base_pages, max);
+    
+    if (node_is_toptier(nid)) {
+	if (memcg->max_nr_dram_pages == ULONG_MAX)
+	    WRITE_ONCE(memcg->max_nr_dram_pages, max);
+	else
+	    memcg->max_nr_dram_pages += max;
+    }
 
     return nbytes;
 }

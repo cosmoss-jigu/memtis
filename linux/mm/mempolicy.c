@@ -3014,8 +3014,10 @@ bool numa_demotion_enabled = false;
 unsigned int htmm_sample_period = 10007;
 unsigned int htmm_thres_hot = 2;
 unsigned int htmm_thres_cold = 7;
+unsigned int htmm_min_cooling_interval = 1000; /* in ms, 1s */
 unsigned int htmm_demotion_period_in_ms = 100;
 unsigned int htmm_promotion_period_in_ms = 100;
+unsigned int htmm_mode = 1;
 #endif
 
 #ifdef CONFIG_SYSFS
@@ -3151,6 +3153,32 @@ static struct kobj_attribute htmm_thres_cold_attr =
 	__ATTR(htmm_thres_cold, 0644, htmm_thres_cold_show,
 	       htmm_thres_cold_store);
 
+static ssize_t htmm_min_cooling_interval_show(struct kobject *kobj,
+				    struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%u\n", htmm_min_cooling_interval);
+}
+
+static ssize_t htmm_min_cooling_interval_store(struct kobject *kobj,
+				     struct kobj_attribute *attr,
+				     const char *buf, size_t count)
+{
+	int err;
+	unsigned int interval;
+
+	err = kstrtouint(buf, 10, &interval);
+	if (err)
+		return err;
+
+	WRITE_ONCE(htmm_min_cooling_interval, interval);
+	return count;
+}
+
+static struct kobj_attribute htmm_min_cooling_interval_attr =
+	__ATTR(htmm_min_cooling_interval, 0644, htmm_min_cooling_interval_show,
+	       htmm_min_cooling_interval_store);
+
+
 static ssize_t htmm_demotion_period_show(struct kobject *kobj,
 				   struct kobj_attribute *attr, char *buf)
 {
@@ -3201,13 +3229,52 @@ static struct kobj_attribute htmm_promotion_period_attr =
 	__ATTR(htmm_promotion_period_in_ms, 0644, htmm_promotion_period_show,
 	       htmm_promotion_period_store);
 
+static ssize_t htmm_mode_show(struct kobject *kobj,
+			      struct kobj_attribute *attr, char *buf)
+{
+	if (htmm_mode == HTMM_NO_MIG)
+		return sysfs_emit(buf, "%s\n", "NO MIGRATION [0]");
+	else if (htmm_mode == HTMM_BASELINE)
+		return sysfs_emit(buf, "%s\n", "NORMAL TMM BASELINE [1]");
+	else /* htmm_mode == HTMM_HUGEPAGE_OPT */
+		return sysfs_emit(buf, "%s\n", "HUGEPAGE OPTIMIZED [2]");
+}
+
+static ssize_t htmm_mode_store(struct kobject *kobj,
+			       struct kobj_attribute *attr,
+			       const char *buf, size_t count)
+{
+	int err;
+	unsigned int mode;
+
+	err = kstrtouint(buf, 10, &mode);
+	if (err)
+		return err;
+
+	switch (mode) {
+		case HTMM_NO_MIG:
+		case HTMM_BASELINE:
+		case HTMM_HUGEPAGE_OPT:
+			WRITE_ONCE(htmm_mode, mode);
+			break;
+		default:
+			return -EINVAL;
+	}
+	return count;
+}
+
+static struct kobj_attribute htmm_mode_attr =
+	__ATTR(htmm_mode, 0644, htmm_mode_show,
+	       htmm_mode_store);
 
 static struct attribute *htmm_attrs[] = {
 	&htmm_sample_period_attr.attr,
 	&htmm_thres_hot_attr.attr,
 	&htmm_thres_cold_attr.attr,
+	&htmm_min_cooling_interval_attr.attr,
 	&htmm_demotion_period_attr.attr,
 	&htmm_promotion_period_attr.attr,
+	&htmm_mode_attr.attr,
 	NULL,
 };
 
