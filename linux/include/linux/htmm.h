@@ -26,7 +26,6 @@ struct htmm_event {
     __u64 addr;
 };
 
-
 enum events {
     DRAMREAD = 0,
     NVMREAD = 1,
@@ -36,6 +35,17 @@ enum events {
     N_HTMMEVENTS
 };
 
+typedef struct huge_region {
+    struct vm_area_struct *vma;
+    struct list_head hr_entry;
+    spinlock_t lock;
+    unsigned long haddr;
+    unsigned int hot_utils;
+    unsigned int total_accesses;
+    unsigned int cur_hv;
+    unsigned int prev_hv;
+} huge_region_t;
+
 /* htmm_core.c */
 extern void htmm_mm_init(struct mm_struct *mm);
 extern void __prep_transhuge_page_for_htmm(struct page *page);
@@ -44,6 +54,15 @@ extern void prep_transhuge_page_for_htmm(struct vm_area_struct *vma,
 extern void copy_transhuge_pginfo(struct page *page,
 				  struct page *newpage);
 extern void update_pginfo(pid_t pid, unsigned long address);
+
+extern struct kmem_cache *huge_region_cachep;
+
+extern huge_region_t *huge_region_alloc(void);
+extern void huge_region_free(huge_region_t *node);
+extern void *huge_region_lookup(struct mm_struct *mm, unsigned long addr);
+extern void *huge_region_delete(struct mm_struct *mm, unsigned long addr);
+extern void *huge_region_insert(struct mm_struct *mm, unsigned long addr,
+				huge_region_t *node);
 
 /* htmm_sampler.c */
 extern int ksamplingd_init(pid_t pid, int node);

@@ -418,6 +418,27 @@ struct core_state {
 	struct completion startup;
 };
 
+#ifdef CONFIG_HTMM
+struct huge_region_info {
+	spinlock_t	    lock;
+	struct list_head    thp_toptier_list;
+	struct list_head    thp_lowertier_list;
+	struct list_head    base_list;
+};
+
+/* struct xarray is already declared in linux/xarray.h,
+ * but including it in mm_types.h incurs issues.
+ * So, we declare struct xarray in linux/mm_types.h to use it in mm_struct.
+ * Of course, other components which use xarray (e.g., page cache) incur
+ * no problems.
+ */
+struct xarray {
+	spinlock_t	xa_lock;
+	gfp_t		xa_flags;
+	void __rcu *	xa_head;
+};
+#endif
+
 struct kioctx_table;
 struct mm_struct {
 	struct {
@@ -603,6 +624,8 @@ struct mm_struct {
 
 #ifdef CONFIG_HTMM
 		bool htmm_enabled;
+		struct xarray root_huge_region_map;
+		struct huge_region_info hri;
 #endif
 	} __randomize_layout;
 

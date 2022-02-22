@@ -9,6 +9,7 @@
 #include <linux/mempolicy.h>
 #include <linux/swap.h>
 #include <linux/sched/task.h>
+#include <linux/xarray.h>
 
 #include "internal.h"
 #include <asm/pgtable.h>
@@ -23,6 +24,10 @@ void htmm_mm_init(struct mm_struct *mm)
     }
     
     mm->htmm_enabled = true;
+    spin_lock_init(&mm->hri.lock);
+    INIT_LIST_HEAD(&mm->hri.thp_toptier_list);
+    INIT_LIST_HEAD(&mm->hri.thp_lowertier_list);
+    INIT_LIST_HEAD(&mm->hri.base_list);
 }
 
 void __prep_transhuge_page_for_htmm(struct page *page)
@@ -172,6 +177,31 @@ static bool is_hot_huge_page(struct page *page)
     return page->total_accesses >= htmm_thres_hot;
 }
 
+static void update_huge_region(struct vm_area_struct *vma, 
+	unsigned long haddr, bool newly_hot)
+{
+    struct mm_struct *mm = vma->vm_mm;
+    huge_region_t *node;
+
+    node = huge_region_lookup(mm, haddr);
+    if (!node) {
+	node = huge_region_alloc();
+	if (!node)
+	    return;
+
+	node->vma = vma;
+	node->haddr = haddr;
+	huge_region_insert(vma->vm_mm, haddr, node);
+    }
+
+    if (!spin_trylock_irq(&node->lock))
+	return;
+
+    /* TODO */
+
+    spin_unlock_irq(&node->lock);
+}
+
 static void move_page_to_active_lru(struct page *page)
 {
     struct lruvec *lruvec;
@@ -238,12 +268,13 @@ static void __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,
 
     pginfo->nr_accesses++;
     if (pginfo->nr_accesses >= htmm_thres_hot) {
-	//printk("page %lx is hot... nr_accesses%lu\n", address, pginfo->nr_accesses);
+	bool newly_hot = false;
 	if (!PageActive(page)) {
 	    move_page_to_active_lru(page);
+	    newly_hot = true;
 	}
 	if (transhuge_vma_suitable(vma, address & HPAGE_PMD_MASK)) {
-	    // TODO huge region
+	    update_huge_region(vma, address & HPAGE_PMD_MASK, true);
 	}
     }
 
@@ -364,4 +395,51 @@ mmap_unlock:
     mmap_read_unlock(mm);
 put_task:
     put_pid(pid_struct);
+}
+
+struct kmem_cache *huge_region_cachep;
+
+static int __init huge_region_kmem_cache_init(void)
+{
+    huge_region_cachep = kmem_cache_create("huge_region",
+					   sizeof(huge_region_t), 0,
+					   SLAB_PANIC, NULL);
+    return 0;
+}
+core_initcall(huge_region_kmem_cache_init);
+
+huge_region_t *huge_region_alloc(void)
+{
+    huge_region_t *node;
+    node = kmem_cache_zalloc(huge_region_cachep, GFP_KERNEL);
+    if (!node)
+	return NULL;
+
+    /* initialize */
+    INIT_LIST_HEAD(&node->hr_entry);
+    spin_lock_init(&node->lock);
+    node->vma = NULL;
+    return node;
+}
+
+void huge_region_free(huge_region_t *node)
+{
+    kmem_cache_free(huge_region_cachep, node);
+}
+
+void *huge_region_lookup(struct mm_struct *mm, unsigned long addr)
+{
+    return xa_load(&mm->root_huge_region_map, addr >> HPAGE_SHIFT);
+}
+
+void *huge_region_delete(struct mm_struct *mm, unsigned long addr)
+{
+    return xa_erase(&mm->root_huge_region_map, addr >> HPAGE_SHIFT);
+}
+
+void *huge_region_insert(struct mm_struct *mm, unsigned long addr,
+			 huge_region_t *node)
+{
+    return xa_store(&mm->root_huge_region_map, addr >> HPAGE_SHIFT,
+		    (void *)node, GFP_KERNEL);
 }
