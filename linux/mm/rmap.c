@@ -74,6 +74,9 @@
 #include <linux/memremap.h>
 #include <linux/userfaultfd_k.h>
 
+#ifdef CONFIG_HTMM
+#include <linux/htmm.h>
+#endif
 #include <asm/tlbflush.h>
 
 #include <trace/events/tlb.h>
@@ -937,10 +940,32 @@ static bool cooling_page_one(struct page *page, struct vm_area_struct *vma,
 		hca->page_is_hot = true;
 	} else if (pvmw.pmd) {
 	    if (pmd_trans_huge(*pvmw.pmd) || pmd_devmap(*pvmw.pmd)) {
-		VM_BUG_ON_PAGE(!PageCompound(page), page);
+		int i, idx, offset;
+		struct page *meta;
 
+		VM_BUG_ON_PAGE(!PageCompound(page), page);		
 		/* TODO: cooling huge pages */
+		meta = get_meta_page(page);
+		meta->hot_utils = 0;
+		meta->total_accesses = 0;
 
+		for (i = 0; i < HPAGE_PMD_NR; i++) {
+		    idx = 4 + i / 8;
+		    offset = i % 8;
+
+		    pginfo = page[idx].compound_pginfo[offset];
+		    if (pginfo->nr_accesses >= htmm_thres_hot)
+			pginfo->nr_accesses >>= 1;
+
+		    meta->total_accesses += pginfo->nr_accesses;
+		    if (pginfo->nr_accesses >= htmm_thres_hot)
+			meta->hot_utils++;
+		}
+
+		meta->prev_hv = meta->cur_hv;
+		meta->cur_hv = cal_huge_hotness((void *)meta, true);
+		if (is_hot_huge_page(meta))
+		    hca->page_is_hot = true;
 	    }
 	}
     }

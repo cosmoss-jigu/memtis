@@ -63,6 +63,10 @@ extern void copy_transhuge_pginfo(struct page *page,
 extern void update_pginfo(pid_t pid, unsigned long address);
 extern bool region_for_toptier(huge_region_t *region);
 
+extern struct page *get_meta_page(struct page *page);
+extern long cal_huge_hotness(void *meta, bool huge);
+extern bool is_hot_huge_page(struct page *meta);
+
 extern struct kmem_cache *huge_region_cachep;
 
 extern huge_region_t *huge_region_alloc(void);

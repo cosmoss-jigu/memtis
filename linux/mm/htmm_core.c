@@ -101,7 +101,7 @@ pginfo_t *get_compound_pginfo(struct page *page, unsigned long address)
     return &(page[idx].compound_pginfo[offset]);
 }
 
-static struct page *get_meta_page(struct page *page)
+struct page *get_meta_page(struct page *page)
 {
     return &page[3];
 }
@@ -120,8 +120,10 @@ void free_pginfo_pte(struct page *pte)
 
 bool region_for_toptier(huge_region_t *node)
 {
-    // TODO modify
-    return node->cur_hv >= htmm_thres_huge_hot;
+    unsigned long hotness;
+
+    hotness = MULTIPLIER * node->cur_hv / 10 + (10 - MULTIPLIER) * node->prev_hv / 10;
+    return hotness >= htmm_thres_huge_hot;
 }
 
 static bool reach_cooling_thres(pginfo_t *pginfo, struct page *meta_page, bool hugepage)
@@ -236,12 +238,12 @@ unsigned long translation_benefit(void *meta, bool huge)
     return benefits;
 }
 
-static long cal_huge_hotness(void *meta, bool huge)
+long cal_huge_hotness(void *meta, bool huge)
 {
     return access_benefit(meta, huge) - access_penalty(meta, huge) + translation_benefit(meta, huge);
 }
 
-static bool is_hot_huge_page(struct page *meta)
+bool is_hot_huge_page(struct page *meta)
 {
     unsigned long hotness;
 
