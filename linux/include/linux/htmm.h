@@ -19,6 +19,13 @@
 #define	HTMM_BASELINE	    0x1
 #define HTMM_HUGEPAGE_OPT   0x2
 
+/**/
+#define DRAM_ACCESS_CYCLES  150
+#define NVM_ACCESS_CYCLES   500
+#define DELTA_CYCLES	(NVM_ACCESS_CYCLES - DRAM_ACCESS_CYCLES)
+
+#define MULTIPLIER  4
+
 struct htmm_event {
     struct perf_event_header header;
     __u64 ip;
@@ -54,6 +61,7 @@ extern void prep_transhuge_page_for_htmm(struct vm_area_struct *vma,
 extern void copy_transhuge_pginfo(struct page *page,
 				  struct page *newpage);
 extern void update_pginfo(pid_t pid, unsigned long address);
+extern bool region_for_toptier(huge_region_t *region);
 
 extern struct kmem_cache *huge_region_cachep;
 

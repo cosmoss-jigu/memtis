@@ -17,6 +17,7 @@
 void htmm_mm_init(struct mm_struct *mm)
 {
     struct mem_cgroup *memcg = get_mem_cgroup_from_mm(mm);
+    int i;
 
     if (!memcg || !memcg->htmm_enabled) {
 	mm->htmm_enabled = false;
@@ -25,11 +26,12 @@ void htmm_mm_init(struct mm_struct *mm)
     
     mm->htmm_enabled = true;
     spin_lock_init(&mm->hri.lock);
-    INIT_LIST_HEAD(&mm->hri.thp_toptier_list);
-    INIT_LIST_HEAD(&mm->hri.thp_lowertier_list);
-    INIT_LIST_HEAD(&mm->hri.base_list);
+    for (i = 0; i < NR_REGION_LIST; i++)
+	INIT_LIST_HEAD(&mm->hri.region_list[i]);
 }
 
+/* Hugepage uses tail pages to store access information.
+ * See struct page declaration in linux/mm_types.h */
 void __prep_transhuge_page_for_htmm(struct page *page)
 {
     int i, idx, offset;
@@ -103,6 +105,7 @@ static struct page *get_meta_page(struct page *page)
 {
     return &page[3];
 }
+
 /* linux/mm.h */
 void free_pginfo_pte(struct page *pte)
 {
@@ -115,13 +118,19 @@ void free_pginfo_pte(struct page *pte)
     ClearPageHtmm(pte);
 }
 
+bool region_for_toptier(huge_region_t *node)
+{
+    // TODO modify
+    return node->cur_hv >= htmm_thres_huge_hot;
+}
+
 static bool reach_cooling_thres(pginfo_t *pginfo, struct page *meta_page, bool hugepage)
 {
     if (hugepage) {
 	if (htmm_mode == HTMM_BASELINE)
 	    return meta_page->total_accesses >= htmm_thres_cold;
-	else /* will be updated */
-	    return false;
+	else 
+	    return pginfo->nr_accesses >= htmm_thres_cold;
     }
 
     return pginfo->nr_accesses >= htmm_thres_cold;
@@ -147,6 +156,10 @@ static bool need_lru_cooling(struct mm_struct *mm,
 	return false;
     
     /* need cooling */
+    /*
+     * The next cooling operation can be executed only after
+     * the htmm_min_cooling_interval has elapsed.
+     */
     next = now + msecs_to_jiffies(htmm_min_cooling_interval);
     if (cmpxchg(&memcg->htmm_next_cooling, cur, next) != cur)
 	return false;
@@ -172,9 +185,68 @@ static void set_lru_cooling(struct mm_struct *mm)
     }
 }
 
-static bool is_hot_huge_page(struct page *page)
+/*
+ * "huge" is true if the target meta is the third tail page of the huge page.
+ * "huge" is false if the target meta is the information for huge region.
+ */
+unsigned long access_benefit(void *meta, bool huge)
 {
-    return page->total_accesses >= htmm_thres_hot;
+    if (huge) {
+	struct page *meta_page = (struct page *)meta;
+	return meta_page->total_accesses * DELTA_CYCLES;
+    } else {
+	huge_region_t *node = (huge_region_t *)meta;
+	return node->total_accesses * DELTA_CYCLES;
+    }
+}
+
+unsigned long access_penalty(void *meta, bool huge)
+{
+    if (huge) {
+	struct page *meta_page = (struct page *)meta;
+	return (HPAGE_PMD_NR - meta_page->hot_utils) * htmm_thres_hot * DELTA_CYCLES;
+    } else {
+	huge_region_t *node = (huge_region_t *)meta;
+	return (HPAGE_PMD_NR - node->hot_utils) * htmm_thres_hot * DELTA_CYCLES;
+    }
+}
+
+unsigned long translation_benefit(void *meta, bool huge)
+{
+    unsigned long benefits;
+    unsigned long hot_utils, total_accesses;
+    
+    if (huge) {
+	struct page *meta_page = (struct page *)meta;
+	hot_utils = meta_page->hot_utils;
+	total_accesses = meta_page->total_accesses;
+    } else {
+	huge_region_t *node = (huge_region_t *)meta;
+	hot_utils = node->hot_utils;
+	total_accesses = node->hot_utils;
+    }
+
+    if (hot_utils == 0)
+	return 0;
+    
+    benefits = total_accesses;
+    benefits *= DRAM_ACCESS_CYCLES;
+    benefits = ((hot_utils << 2) - 3) * benefits / (hot_utils << 2);
+    /* correction may be neccessary */ 
+    return benefits;
+}
+
+static long cal_huge_hotness(void *meta, bool huge)
+{
+    return access_benefit(meta, huge) - access_penalty(meta, huge) + translation_benefit(meta, huge);
+}
+
+static bool is_hot_huge_page(struct page *meta)
+{
+    unsigned long hotness;
+
+    hotness = MULTIPLIER * meta->cur_hv / 10 + (10 - MULTIPLIER) * meta->prev_hv / 10;
+    return hotness >= htmm_thres_huge_hot;
 }
 
 static void update_huge_region(struct vm_area_struct *vma, 
@@ -192,12 +264,23 @@ static void update_huge_region(struct vm_area_struct *vma,
 	node->vma = vma;
 	node->haddr = haddr;
 	huge_region_insert(vma->vm_mm, haddr, node);
+	
+	/* insert node into mm's region_list */
+	spin_lock(&mm->hri.lock);
+	list_add_tail(&node->hr_entry, &mm->hri.region_list[BASE_PAGES]);
+	spin_unlock(&mm->hri.lock);
     }
 
     if (!spin_trylock_irq(&node->lock))
 	return;
 
-    /* TODO */
+    node->total_accesses++;
+    if (newly_hot)
+	node->hot_utils++;
+    
+    /* calculate hotness value */
+    node->prev_hv = node->cur_hv;
+    node->cur_hv = cal_huge_hotness((void *)node, false);
 
     spin_unlock_irq(&node->lock);
 }
@@ -266,14 +349,17 @@ static void __update_pte_pginfo(struct vm_area_struct *vma, pmd_t *pmd,
     if (!pginfo)
 	goto pte_unlock;
 
-    pginfo->nr_accesses++;
+    //if (pginfo->nr_accesses <= htmm_thres_cold)
+	pginfo->nr_accesses++;
+
     if (pginfo->nr_accesses >= htmm_thres_hot) {
 	bool newly_hot = false;
 	if (!PageActive(page)) {
 	    move_page_to_active_lru(page);
 	    newly_hot = true;
 	}
-	if (transhuge_vma_suitable(vma, address & HPAGE_PMD_MASK)) {
+	if (htmm_mode == HTMM_HUGEPAGE_OPT &&
+	    transhuge_vma_suitable(vma, address & HPAGE_PMD_MASK)) {
 	    update_huge_region(vma, address & HPAGE_PMD_MASK, true);
 	}
     }
@@ -329,14 +415,26 @@ static void __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
 
 	pginfo->nr_accesses++;
 	meta_page->total_accesses++;
-	if (is_hot_huge_page(meta_page)) {
-	    if (!PageActive(page)) {
-		move_page_to_active_lru(page);
+
+	if (htmm_mode == HTMM_HUGEPAGE_OPT) {
+	    if (pginfo->nr_accesses == htmm_thres_hot)
 		meta_page->hot_utils++;
+
+	    /* if page is active, hotness will be updated by the cooling op */
+	    if (!PageActive(page)) {
+		meta_page->prev_hv = meta_page->cur_hv;
+		meta_page->cur_hv = cal_huge_hotness((void *)meta_page, true);
+
+		if (is_hot_huge_page(meta_page))
+		    move_page_to_active_lru(page);
 	    }
+	    
+	} else { /* HTMM_BASELINE */
+	    if (!PageActive(page) && meta_page->total_accesses >= htmm_thres_hot)
+		move_page_to_active_lru(page);
 	}
 
-	if (reach_cooling_thres(NULL, meta_page, true) &&
+	if (reach_cooling_thres(pginfo, meta_page, true) &&
 		need_lru_cooling(vma->vm_mm, page))
 	    set_lru_cooling(vma->vm_mm);
 	

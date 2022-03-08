@@ -7607,8 +7607,8 @@ static ssize_t memcg_per_node_max_write(struct kernfs_open_file *of,
     struct mem_cgroup *memcg = mem_cgroup_from_css(of_css(of));
     struct cftype *cur_file = of_cft(of);
     int nid = cur_file->numa_node_id;
-    unsigned long max;
-    int err;
+    unsigned long max, nr_dram_pages = 0;
+    int err, n;
 
     buf = strstrip(buf);
     err = page_counter_memparse(buf, "max", &max);
@@ -7617,12 +7617,14 @@ static ssize_t memcg_per_node_max_write(struct kernfs_open_file *of,
 
     xchg(&memcg->nodeinfo[nid]->max_nr_base_pages, max);
     
-    if (node_is_toptier(nid)) {
-	if (memcg->max_nr_dram_pages == ULONG_MAX)
-	    WRITE_ONCE(memcg->max_nr_dram_pages, max);
-	else
-	    memcg->max_nr_dram_pages += max;
+    for_each_node_state(n, N_MEMORY) {
+	if (node_is_toptier(n)) {
+	    if (memcg->nodeinfo[n]->max_nr_base_pages != ULONG_MAX)
+		nr_dram_pages += memcg->nodeinfo[n]->max_nr_base_pages;
+	}
     }
+    if (nr_dram_pages)
+	memcg->max_nr_dram_pages = nr_dram_pages;
 
     return nbytes;
 }

@@ -419,11 +419,16 @@ struct core_state {
 };
 
 #ifdef CONFIG_HTMM
+enum region_list {
+	HUGE_TOPTIER = 0,
+	HUGE_LOWERTIER = 1,
+	BASE_PAGES = 2,
+	NR_REGION_LIST
+};
+
 struct huge_region_info {
 	spinlock_t	    lock;
-	struct list_head    thp_toptier_list;
-	struct list_head    thp_lowertier_list;
-	struct list_head    base_list;
+	struct list_head    region_list[3];
 };
 
 /* struct xarray is already declared in linux/xarray.h,
