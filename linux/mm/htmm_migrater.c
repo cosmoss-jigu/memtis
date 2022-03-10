@@ -95,7 +95,7 @@ static bool need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgroup *memcg)
     return lruvec_size ? true : false;
 }
 
-static bool need_toptier_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg)
+static bool need_toptier_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg, unsigned long *nr_exceeded)
 {
     unsigned long nr_lru_pages, max_nr_pages;
 
@@ -110,6 +110,11 @@ static bool need_toptier_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg)
 	    return false;
 
 	target_pgdat = NODE_DATA(target_nid);
+	if (nr_lru_pages > max_nr_pages) {
+	    *nr_exceeded = (nr_lru_pages - max_nr_pages + HTMM_MIN_FREE_PAGES);
+	    return true;
+	}
+
 	if (need_lowertier_promotion(target_pgdat, memcg))
 	    return true;
     }
@@ -288,7 +293,7 @@ static unsigned long migrate_page_list(struct list_head *migrate_list,
 }
 
 static unsigned long shrink_page_list(struct list_head *page_list,
-	pg_data_t* pgdat)
+	pg_data_t* pgdat, bool shrink_active)
 {
     LIST_HEAD(demote_pages);
     LIST_HEAD(ret_pages);
@@ -304,7 +309,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 
 	if (!trylock_page(page))
 	    goto keep;
-	if (PageActive(page))
+	if (!shrink_active && PageActive(page))
 	    goto keep_locked;
 	if (unlikely(!page_evictable(page)))
 	    goto keep_locked;
@@ -375,7 +380,7 @@ __keep:
 }
 
 static unsigned long demote_inactive_list(unsigned long nr_to_scan,
-	struct lruvec *lruvec, enum lru_list lru)
+	struct lruvec *lruvec, enum lru_list lru, bool shrink_active)
 {
     LIST_HEAD(page_list);
     pg_data_t *pgdat = lruvec_pgdat(lruvec);
@@ -392,7 +397,7 @@ static unsigned long demote_inactive_list(unsigned long nr_to_scan,
     if (nr_taken == 0)
 	return 0;
     
-    nr_reclaimed = shrink_page_list(&page_list, pgdat);
+    nr_reclaimed = shrink_page_list(&page_list, pgdat, shrink_active);
 
     spin_lock_irq(&lruvec->lru_lock);
     move_pages_to_lru(lruvec, &page_list);
@@ -436,13 +441,13 @@ static unsigned long promote_active_list(unsigned long nr_to_scan,
 }
 
 static unsigned long demote_lruvec(unsigned long nr_to_reclaim, short priority,
-	pg_data_t *pgdat, struct lruvec *lruvec)
+	pg_data_t *pgdat, struct lruvec *lruvec, bool shrink_active)
 {
     enum lru_list lru;
     unsigned long nr_reclaimed = 0, nr_to_scan;
 
     for_each_evictable_lru(lru) {
-	if (is_active_lru(lru))
+	if (!shrink_active && is_active_lru(lru))
 	    continue;	
 	
 	if (is_file_lru(lru))
@@ -450,7 +455,7 @@ static unsigned long demote_lruvec(unsigned long nr_to_reclaim, short priority,
 	else
 	    nr_to_scan = lruvec_lru_size(lruvec, lru, MAX_NR_ZONES) >> priority;
 
-	nr_reclaimed += demote_inactive_list(nr_to_scan, lruvec, lru);
+	nr_reclaimed += demote_inactive_list(nr_to_scan, lruvec, lru, shrink_active);
     }
 
     return nr_reclaimed;
@@ -470,26 +475,34 @@ static unsigned long promote_lruvec(unsigned long nr_to_promote, short priority,
     return nr_promoted;
 }
 
-static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
+static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
+	unsigned long nr_exceeded)
 {
     struct lruvec *lruvec = mem_cgroup_lruvec(memcg, pgdat);
     short priority = DEF_PRIORITY;
     unsigned long nr_to_reclaim = 0, nr_evictable_pages = 0, nr_reclaimed = 0;
     enum lru_list lru;
+    bool shrink_active = false;
 
-    nr_to_reclaim = MAX_MIGRATION_RATE_IN_MBPS * 256;
-    nr_to_reclaim *= htmm_demotion_period_in_ms;
-    nr_to_reclaim /= 1000; // max num. of demotable pages in this period.
-    
+    if (nr_exceeded) {
+	/* exceeded pages should be demoted */
+	nr_to_reclaim = nr_exceeded;
+	shrink_active = true;
+    } else {
+	nr_to_reclaim = MAX_MIGRATION_RATE_IN_MBPS * 256;
+	nr_to_reclaim *= htmm_demotion_period_in_ms;
+	nr_to_reclaim /= 1000; // max num. of demotable pages in this period.
+    }
+
     for_each_evictable_lru(lru) {
-	if (is_active_lru(lru))
+	if (!shrink_active && is_active_lru(lru))
 	    continue;
 	nr_evictable_pages += lruvec_lru_size(lruvec, lru, MAX_NR_ZONES);
     }
     nr_to_reclaim = min(nr_to_reclaim, nr_evictable_pages);
     
     do {
-	nr_reclaimed += demote_lruvec(nr_to_reclaim, priority, pgdat, lruvec);
+	nr_reclaimed += demote_lruvec(nr_to_reclaim, priority, pgdat, lruvec, shrink_active);
 	if (nr_reclaimed >= nr_to_reclaim)
 	    break;
 	priority--;
@@ -529,6 +542,7 @@ static void cooling_active_list(unsigned long nr_to_scan,
     LIST_HEAD(l_active);
     LIST_HEAD(l_inactive);
     int file = is_file_lru(lru);
+    int test;
 
     lru_add_drain();
 
@@ -558,6 +572,9 @@ static void cooling_active_list(unsigned long nr_to_scan,
 		continue;
 	    }
 	}
+
+	if (PageCompound(page) && can_split_huge_page(page, &test))
+	    printk("can split\n");
 
 	/* cold or file page */
 	ClearPageActive(page);
@@ -623,6 +640,7 @@ static int kmigraterd_demotion(pg_data_t *pgdat)
     for ( ; ; ) {
 	struct mem_cgroup_per_node *pn;
 	struct mem_cgroup *memcg;
+	unsigned long nr_exceeded = 0;
 
 	if (kthread_should_stop())
 	    break;
@@ -648,8 +666,8 @@ static int kmigraterd_demotion(pg_data_t *pgdat)
 	}
 
 	/* demotes inactive lru pages */
-	if (need_toptier_demotion(pgdat, memcg)) {
-	    demote_node(pgdat, memcg); 
+	if (need_toptier_demotion(pgdat, memcg, &nr_exceeded)) {
+	    demote_node(pgdat, memcg, nr_exceeded);
 	}
 
 	/* performs cooling */
