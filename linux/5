@@ -1,0 +1,10 @@
+include/linux/bpf.h mem_cgroup 43 struct mem_cgroup;
+include/linux/fsnotify_backend.h mem_cgroup 113 struct mem_cgroup;
+include/linux/ksm.h mem_cgroup 19 struct mem_cgroup;
+include/linux/list_lru.h mem_cgroup 15 struct mem_cgroup;
+include/linux/memcontrol.h mem_cgroup 25 struct mem_cgroup;
+include/linux/memcontrol.h mem_cgroup 241 struct mem_cgroup {
+include/linux/mm_types.h mem_cgroup 29 struct mem_cgroup;
+include/linux/oom.h mem_cgroup 15 struct mem_cgroup;
+include/linux/slab.h mem_cgroup 138 struct mem_cgroup;
+include/linux/vmpressure.h mem_cgroup 30 struct mem_cgroup;

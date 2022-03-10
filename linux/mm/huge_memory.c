@@ -2110,7 +2110,25 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 			atomic_inc(&page[i]._mapcount);
 		pte_unmap(pte);
 	}
+#ifdef CONFIG_HTMM
+	/* pginfo-s managed by the huge page should be copied into pte->pginfo*/
+	if (PageHtmm(&page[3])) {
+	    pte_t *pte = pte_offset_map(&_pmd, haddr);
+	    
+	    for (i = 0, addr = haddr; i < HPAGE_PMD_NR; i++, addr += PAGE_SIZE) {
+		pginfo_t *pte_pginfo, *tail_pginfo;
 
+		pte_pginfo = get_pginfo_from_pte(&pte[i]);
+		tail_pginfo = get_compound_pginfo(page, addr);
+		if (!pte_pginfo || !tail_pginfo)
+		    goto skip_copy_pginfo;
+
+		pte_pginfo->nr_accesses = tail_pginfo->nr_accesses;
+		ClearPageHtmm(&page[i]);
+	    }
+	}
+skip_copy_pginfo:
+#endif
 	if (!pmd_migration) {
 		/*
 		 * Set PG_double_map before dropping compound_mapcount to avoid

@@ -953,7 +953,7 @@ static bool cooling_page_one(struct page *page, struct vm_area_struct *vma,
 		    idx = 4 + i / 8;
 		    offset = i % 8;
 
-		    pginfo = page[idx].compound_pginfo[offset];
+		    pginfo = &(page[idx].compound_pginfo[offset]);
 		    if (pginfo->nr_accesses >= htmm_thres_hot)
 			pginfo->nr_accesses >>= 1;
 
@@ -963,7 +963,7 @@ static bool cooling_page_one(struct page *page, struct vm_area_struct *vma,
 		}
 
 		meta->prev_hv = meta->cur_hv;
-		meta->cur_hv = cal_huge_hotness((void *)meta, true);
+		meta->cur_hv = cal_huge_hotness(hca->memcg, (void *)meta, true);
 		if (is_hot_huge_page(meta))
 		    hca->page_is_hot = true;
 	    }

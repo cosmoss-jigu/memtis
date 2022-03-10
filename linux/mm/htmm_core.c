@@ -10,6 +10,7 @@
 #include <linux/swap.h>
 #include <linux/sched/task.h>
 #include <linux/xarray.h>
+#include <linux/math.h>
 
 #include "internal.h"
 #include <asm/pgtable.h>
@@ -101,6 +102,78 @@ pginfo_t *get_compound_pginfo(struct page *page, unsigned long address)
     return &(page[idx].compound_pginfo[offset]);
 }
 
+struct deferred_split *get_deferred_split_queue_for_htmm(struct page *page)
+{
+    struct mem_cgroup *memcg = page_memcg(compound_head(page));
+    struct mem_cgroup_per_node *pn = memcg->nodeinfo[page_to_nid(page)];
+
+    if (!memcg || !memcg->htmm_enabled)
+	return NULL;
+    else
+	return &pn->deferred_split_queue;
+}
+
+void deferred_split_huge_page_for_htmm(struct page *page)
+{
+    struct deferred_split *ds_queue = get_deferred_split_queue_for_htmm(page);
+    unsigned long flags;
+
+    VM_BUG_ON_PAGE(!PageTransHuge(page), page);
+
+    if (PageSwapCache(page))
+	return;
+
+    if (!ds_queue)
+	return;
+    
+    spin_lock_irqsave(&ds_queue->split_queue_lock, flags);
+    if (list_empty(page_deferred_list(page))) {
+	count_vm_event(THP_DEFERRED_SPLIT_PAGE);
+	list_add_tail(page_deferred_list(page), &ds_queue->split_queue);
+	ds_queue->split_queue_len++;
+    }
+    spin_unlock_irqrestore(&ds_queue->split_queue_lock, flags);
+}
+
+unsigned long deferred_split_scan_for_htmm(struct mem_cgroup_per_node *pn)
+{
+    struct deferred_split *ds_queue = &pn->deferred_split_queue;
+    unsigned long flags;
+    LIST_HEAD(list), *pos, *next;
+    struct page *page;
+    int split = 0;
+
+    spin_lock_irqsave(&ds_queue->split_queue_lock, flags);
+    list_for_each_safe(pos, next, &ds_queue->split_queue) {
+	page = list_entry((void *)pos, struct page, deferred_list);
+	page = compound_head(page);
+	if (get_page_unless_zero(page)) {
+	    list_move(page_deferred_list(page), &list);
+	} else {
+	    list_del_init(page_deferred_list(page));
+	    ds_queue->split_queue_len--;
+	}
+    }
+    spin_unlock_irqrestore(&ds_queue->split_queue_lock, flags);
+
+    list_for_each_safe(pos, next, &list) {
+	page = list_entry((void *)pos, struct page, deferred_list);
+	if (!trylock_page(page))
+	    goto next;
+	if (!split_huge_page(page))
+	    split++;
+	unlock_page(page);
+next:
+	put_page(page);
+    }
+
+    spin_lock_irqsave(&ds_queue->split_queue_lock, flags);
+    list_splice_tail(&list, &ds_queue->split_queue);
+    spin_unlock_irqrestore(&ds_queue->split_queue_lock, flags);
+
+    return split;
+}
+
 struct page *get_meta_page(struct page *page)
 {
     return &page[3];
@@ -154,6 +227,8 @@ static bool need_lru_cooling(struct mm_struct *mm,
 	struct lruvec *lruvec = mem_cgroup_lruvec(memcg, NODE_DATA(nid));
 	nr_active_pages += lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
     }
+
+    memcg->nr_active_pages = nr_active_pages;
     if (nr_active_pages <= memcg->max_nr_dram_pages)
 	return false;
     
@@ -213,6 +288,17 @@ unsigned long access_penalty(void *meta, bool huge)
     }
 }
 
+/*
+ * If the number of hot pages exceeds the DRAM limit,
+ * access_penalty() needs additional penalty.
+ */
+unsigned long compensated_access_penalty(struct mem_cgroup *memcg, void *meta, bool huge)
+{
+    unsigned long ap = access_penalty(meta, huge);
+
+    return ap * memcg->nr_active_pages / memcg->max_nr_dram_pages;
+}
+
 unsigned long translation_benefit(void *meta, bool huge)
 {
     unsigned long benefits;
@@ -230,7 +316,8 @@ unsigned long translation_benefit(void *meta, bool huge)
 
     if (hot_utils == 0)
 	return 0;
-    
+   
+    hot_utils = int_sqrt(hot_utils);
     benefits = total_accesses;
     benefits *= DRAM_ACCESS_CYCLES;
     benefits = ((hot_utils << 2) - 3) * benefits / (hot_utils << 2);
@@ -238,9 +325,9 @@ unsigned long translation_benefit(void *meta, bool huge)
     return benefits;
 }
 
-long cal_huge_hotness(void *meta, bool huge)
+long cal_huge_hotness(struct mem_cgroup *memcg, void *meta, bool huge)
 {
-    return access_benefit(meta, huge) - access_penalty(meta, huge) + translation_benefit(meta, huge);
+    return access_benefit(meta, huge) - compensated_access_penalty(memcg, meta, huge) + translation_benefit(meta, huge);
 }
 
 bool is_hot_huge_page(struct page *meta)
@@ -251,10 +338,30 @@ bool is_hot_huge_page(struct page *meta)
     return hotness >= htmm_thres_huge_hot;
 }
 
+enum region_list hugepage_type(struct page *page)
+{
+    struct page *meta;
+    struct mem_cgroup *memcg;
+    VM_BUG_ON_PAGE(!PageTransHuge(page), page);
+    
+    memcg = page_memcg(compound_head(page));
+    if (!memcg->htmm_enabled)
+	return -1;
+
+    meta = get_meta_page(page);
+    if (is_hot_huge_page(meta))
+	return HUGE_TOPTIER;
+    else if (compensated_access_penalty(memcg, meta, true) < translation_benefit(meta, true))
+	return HUGE_LOWERTIER;
+    else
+	return BASE_PAGES;
+}
+
 static void update_huge_region(struct vm_area_struct *vma, 
 	unsigned long haddr, bool newly_hot)
 {
     struct mm_struct *mm = vma->vm_mm;
+    struct mem_cgroup *memcg = get_mem_cgroup_from_mm(mm);
     huge_region_t *node;
 
     node = huge_region_lookup(mm, haddr);
@@ -282,7 +389,7 @@ static void update_huge_region(struct vm_area_struct *vma,
     
     /* calculate hotness value */
     node->prev_hv = node->cur_hv;
-    node->cur_hv = cal_huge_hotness((void *)node, false);
+    node->cur_hv = cal_huge_hotness(memcg, (void *)node, false);
 
     spin_unlock_irq(&node->lock);
 }
@@ -424,8 +531,12 @@ static void __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
 
 	    /* if page is active, hotness will be updated by the cooling op */
 	    if (!PageActive(page)) {
+		struct mem_cgroup *memcg = page_memcg(page);
+
+		BUG_ON(!memcg->htmm_enabled);
+
 		meta_page->prev_hv = meta_page->cur_hv;
-		meta_page->cur_hv = cal_huge_hotness((void *)meta_page, true);
+		meta_page->cur_hv = cal_huge_hotness(memcg, (void *)meta_page, true);
 
 		if (is_hot_huge_page(meta_page))
 		    move_page_to_active_lru(page);

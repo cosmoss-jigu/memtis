@@ -3012,9 +3012,9 @@ void mpol_to_str(char *buffer, int maxlen, struct mempolicy *pol)
 bool numa_demotion_enabled = false;
 #ifdef CONFIG_HTMM /* sysfs htmm */
 unsigned int htmm_sample_period = 10007;
-unsigned int htmm_thres_huge_hot = 100;
 unsigned int htmm_thres_hot = 2;
 unsigned int htmm_thres_cold = 7;
+unsigned int htmm_thres_huge_hot = 2 * 1024 * (DELTA_CYCLES - DRAM_ACCESS_CYCLES);
 unsigned int htmm_min_cooling_interval = 1000; /* in ms, 1s */
 unsigned int htmm_demotion_period_in_ms = 100;
 unsigned int htmm_promotion_period_in_ms = 100;

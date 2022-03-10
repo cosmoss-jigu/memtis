@@ -145,6 +145,7 @@ struct mem_cgroup_per_node {
 	unsigned long		max_nr_base_pages; /* Set by "max_at_node" param */
 	struct list_head	kmigraterd_list;
 	bool			need_cooling;
+	struct deferred_split deferred_split_queue;
 #endif
 	struct mem_cgroup_reclaim_iter	iter;
 
@@ -354,6 +355,7 @@ struct mem_cgroup {
 #ifdef CONFIG_HTMM /* struct mem_cgroup */
 	bool htmm_enabled;
 	unsigned long max_nr_dram_pages;
+	unsigned long nr_active_pages; /* updated by need_lru_cooling() */
 	unsigned long htmm_next_cooling;
 #endif
 

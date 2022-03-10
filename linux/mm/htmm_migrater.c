@@ -542,7 +542,6 @@ static void cooling_active_list(unsigned long nr_to_scan,
     LIST_HEAD(l_active);
     LIST_HEAD(l_inactive);
     int file = is_file_lru(lru);
-    int test;
 
     lru_add_drain();
 
@@ -573,13 +572,26 @@ static void cooling_active_list(unsigned long nr_to_scan,
 	    }
 	}
 
-	if (PageCompound(page) && can_split_huge_page(page, &test))
-	    printk("can split\n");
-
 	/* cold or file page */
 	ClearPageActive(page);
 	SetPageWorkingset(page);
-	list_add(&page->lru, &l_inactive);
+	if (!PageTransHuge(page)) {
+	    list_add(&page->lru, &l_inactive);
+	    continue;
+	}
+
+	switch (hugepage_type(page)) {
+	    case BASE_PAGES:
+		deferred_split_huge_page_for_htmm(page);
+	    case HUGE_LOWERTIER:
+		list_add(&page->lru, &l_inactive);
+		break;
+	    case HUGE_TOPTIER:
+	    default:
+		printk("ERR: sth wrong in cooling\n");
+		list_add(&page->lru, &l_inactive);
+		break;
+	}
     }
 
     spin_lock_irq(&lruvec->lru_lock);
@@ -675,6 +687,12 @@ static int kmigraterd_demotion(pg_data_t *pgdat)
 	    cooling_node(pgdat, memcg);
 	}
 
+	/* performs split */
+	if (!list_empty(&(&pn->deferred_split_queue)->split_queue)) {
+	    unsigned long nr_splitted;
+	    nr_splitted = deferred_split_scan_for_htmm(pn);
+	    printk("nr_splitted by kdemotiond: %lu\n", nr_splitted);
+	}
 	/* default: wait 100 ms */
 	msleep_interruptible(htmm_demotion_period_in_ms);
     }
@@ -723,7 +741,14 @@ static int kmigraterd_promotion(pg_data_t *pgdat)
 	if (need_lru_cooling(pn)) {
 	    cooling_node(pgdat, memcg);
 	}
-	
+
+	/* performs split */
+	if (!list_empty(&(&pn->deferred_split_queue)->split_queue)) {
+	    unsigned long nr_splitted;
+	    nr_splitted = deferred_split_scan_for_htmm(pn);
+	    printk("nr_splitted by kpromoted: %lu\n", nr_splitted);
+	}
+
 	msleep_interruptible(htmm_promotion_period_in_ms);
     }
 

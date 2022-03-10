@@ -60,12 +60,17 @@ extern void prep_transhuge_page_for_htmm(struct vm_area_struct *vma,
 					 struct page *page);
 extern void copy_transhuge_pginfo(struct page *page,
 				  struct page *newpage);
+extern pginfo_t *get_compound_pginfo(struct page *page, unsigned long address);
 extern void update_pginfo(pid_t pid, unsigned long address);
 extern bool region_for_toptier(huge_region_t *region);
 
+extern void deferred_split_huge_page_for_htmm(struct page *page);
+extern unsigned long deferred_split_scan_for_htmm(struct mem_cgroup_per_node *pn);
+
 extern struct page *get_meta_page(struct page *page);
-extern long cal_huge_hotness(void *meta, bool huge);
+extern long cal_huge_hotness(struct mem_cgroup *memcg, void *meta, bool huge);
 extern bool is_hot_huge_page(struct page *meta);
+extern enum region_list hugepage_type(struct page *page);
 
 extern struct kmem_cache *huge_region_cachep;
 
