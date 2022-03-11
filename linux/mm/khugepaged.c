@@ -2433,7 +2433,7 @@ static struct mm_struct *khugepaged_get_target_mm(void)
 	mm_slot = list_entry(tmp, struct mm_slot, mm_node);
 	mm_tmp = mm_slot->mm;
 
-	if (!list_empty(&mm->hri.region_list[HUGE_TOPTIER])) {
+	if (!list_empty(&mm_tmp->hri.region_list[HUGE_TOPTIER])) {
 	    list_move_tail(tmp, &khugepaged_scan.mm_head);
 	    mm = mm_tmp;
 	    goto get_mm_out;
@@ -2444,7 +2444,7 @@ static struct mm_struct *khugepaged_get_target_mm(void)
 	mm_slot = list_entry(tmp, struct mm_slot, mm_node);
 	mm_tmp = mm_slot->mm;
 
-	if (!list_empty(&mm->hri.region_list[HUGE_LOWERTIER])) {
+	if (!list_empty(&mm_tmp->hri.region_list[HUGE_LOWERTIER])) {
 	    list_move_tail(tmp, &khugepaged_scan.mm_head);
 	    mm = mm_tmp;
 	    goto get_mm_out;
@@ -2532,7 +2532,7 @@ static void khugepaged_region_scan(void)
 {
     struct page *hpage = NULL;
     struct mm_struct *mm = NULL;
-    unsigned int progress = 0;
+    unsigned int progress = 0, pass_through_head = 0;
     unsigned int pages = khugepaged_pages_to_scan;
     unsigned int ret;
     bool wait = true;
@@ -2549,11 +2549,22 @@ static void khugepaged_region_scan(void)
 	    break;
 
 	spin_lock(&khugepaged_mm_lock);
-	mm = khugepaged_get_target_mm();
-	if (mm) {
-	    ret = htmm_scan_mm(mm, pages-progress, &hpage);
-	    /* ... */
+	if (!khugepaged_scan.mm_slot)
+	    pass_through_head++;
+	if (khugepaged_has_work() && pass_through_head < 2) {
+	    mm = khugepaged_get_target_mm();
+	    if (mm) {
+		ret = htmm_scan_mm(mm, pages-progress, &hpage);
+		if (ret != HTMM_NO_WORK)
+		    progress += ret;
+		else
+		    progress = pages;
+	    } else progress = pages;
+	    continue;
 	}
+	else
+	    progress = pages;
+
 	spin_unlock(&khugepaged_mm_lock);
     }
 
@@ -2572,7 +2583,7 @@ static int khugepaged(void *none)
 	while (!kthread_should_stop()) {
 #ifdef CONFIG_HTMM
 		if (htmm_mode == HTMM_HUGEPAGE_OPT) {
-		    khugepaged_region_scan();
+		    //khugepaged_region_scan();
 		    khugepaged_wait_work();
 		    continue;
 		}

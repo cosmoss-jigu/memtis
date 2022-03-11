@@ -177,7 +177,8 @@ static int ksamplingd(void *data)
 			nr_unknown++;
 			break;
 		}
-
+		if (nr_sampled % 100000 == 0)
+		    printk("nr_sampled: %llu \n", nr_sampled);
 		/* read, write barrier */
 		smp_mb();
 		WRITE_ONCE(up->data_tail, up->data_tail + ph->size);

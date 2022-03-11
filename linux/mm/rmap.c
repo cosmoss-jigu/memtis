@@ -946,6 +946,13 @@ static bool cooling_page_one(struct page *page, struct vm_area_struct *vma,
 		VM_BUG_ON_PAGE(!PageCompound(page), page);		
 		/* TODO: cooling huge pages */
 		meta = get_meta_page(page);
+		if (htmm_mode == HTMM_BASELINE) {
+		    meta->total_accesses >>= 1;
+		    if (meta->total_accesses >= htmm_thres_hot)
+			hca->page_is_hot = true;
+		    continue;
+		}
+
 		meta->hot_utils = 0;
 		meta->total_accesses = 0;
 
@@ -956,6 +963,7 @@ static bool cooling_page_one(struct page *page, struct vm_area_struct *vma,
 		    pginfo = &(page[idx].compound_pginfo[offset]);
 		    if (pginfo->nr_accesses >= htmm_thres_hot)
 			pginfo->nr_accesses >>= 1;
+			//pginfo->nr_accesses = min(htmm_thres_cold >> 1, pginfo->nr_accesses >> 1);
 
 		    meta->total_accesses += pginfo->nr_accesses;
 		    if (pginfo->nr_accesses >= htmm_thres_hot)

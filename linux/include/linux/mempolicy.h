@@ -191,6 +191,7 @@ extern unsigned int htmm_thres_huge_hot;
 extern unsigned int htmm_thres_hot;
 extern unsigned int htmm_thres_cold;
 extern unsigned int htmm_min_cooling_interval;
+extern unsigned int htmm_max_cooling_interval;
 extern unsigned int htmm_demotion_period_in_ms;
 extern unsigned int htmm_promotion_period_in_ms;
 extern unsigned int htmm_mode;

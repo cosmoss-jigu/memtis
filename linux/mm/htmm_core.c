@@ -222,6 +222,9 @@ static bool need_lru_cooling(struct mm_struct *mm,
     cur = memcg->htmm_next_cooling;
     if (time_before(now, cur))
 	return false;
+
+    if (time_after(now, cur + msecs_to_jiffies(htmm_max_cooling_interval - htmm_min_cooling_interval)))
+	goto need_cooling;
     
     for_each_node_state(nid, N_MEMORY) {
 	struct lruvec *lruvec = mem_cgroup_lruvec(memcg, NODE_DATA(nid));
@@ -231,7 +234,8 @@ static bool need_lru_cooling(struct mm_struct *mm,
     memcg->nr_active_pages = nr_active_pages;
     if (nr_active_pages <= memcg->max_nr_dram_pages)
 	return false;
-    
+
+need_cooling:
     /* need cooling */
     /*
      * The next cooling operation can be executed only after
@@ -315,9 +319,11 @@ unsigned long translation_benefit(void *meta, bool huge)
     }
 
     if (hot_utils == 0)
-	return 0;
+	hot_utils = 1;
    
     hot_utils = int_sqrt(hot_utils);
+    total_accesses = int_sqrt(total_accesses);
+
     benefits = total_accesses;
     benefits *= DRAM_ACCESS_CYCLES;
     benefits = ((hot_utils << 2) - 3) * benefits / (hot_utils << 2);
@@ -327,7 +333,12 @@ unsigned long translation_benefit(void *meta, bool huge)
 
 long cal_huge_hotness(struct mem_cgroup *memcg, void *meta, bool huge)
 {
-    return access_benefit(meta, huge) - compensated_access_penalty(memcg, meta, huge) + translation_benefit(meta, huge);
+    long ret = access_benefit(meta, huge) - compensated_access_penalty(memcg, meta, huge)
+		+ translation_benefit(meta, huge);
+    if (ret < 0)
+	return 0;
+    else
+	return ret;
 }
 
 bool is_hot_huge_page(struct page *meta)
@@ -390,7 +401,7 @@ static void update_huge_region(struct vm_area_struct *vma,
     /* calculate hotness value */
     node->prev_hv = node->cur_hv;
     node->cur_hv = cal_huge_hotness(memcg, (void *)node, false);
-
+    /* TODO update list position */
     spin_unlock_irq(&node->lock);
 }
 
@@ -541,7 +552,9 @@ static void __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
 		if (is_hot_huge_page(meta_page))
 		    move_page_to_active_lru(page);
 	    }
-	    
+
+	    if (is_hot_huge_page(meta_page))
+		printk("prev_hv: %lu,  cur_hv: %lu,  hot_utils: %lu,  total: %lu\n", meta_page->prev_hv, meta_page->cur_hv, meta_page->hot_utils, meta_page->total_accesses); 
 	} else { /* HTMM_BASELINE */
 	    if (!PageActive(page) && meta_page->total_accesses >= htmm_thres_hot)
 		move_page_to_active_lru(page);

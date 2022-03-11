@@ -579,6 +579,11 @@ static void cooling_active_list(unsigned long nr_to_scan,
 	    list_add(&page->lru, &l_inactive);
 	    continue;
 	}
+	
+	if (htmm_mode == HTMM_BASELINE) {
+	    list_add(&page->lru, &l_inactive);
+	    continue;
+	}
 
 	switch (hugepage_type(page)) {
 	    case BASE_PAGES:
@@ -688,7 +693,8 @@ static int kmigraterd_demotion(pg_data_t *pgdat)
 	}
 
 	/* performs split */
-	if (!list_empty(&(&pn->deferred_split_queue)->split_queue)) {
+	if (htmm_mode == HTMM_HUGEPAGE_OPT &&
+		!list_empty(&(&pn->deferred_split_queue)->split_queue)) {
 	    unsigned long nr_splitted;
 	    nr_splitted = deferred_split_scan_for_htmm(pn);
 	    printk("nr_splitted by kdemotiond: %lu\n", nr_splitted);
@@ -743,7 +749,8 @@ static int kmigraterd_promotion(pg_data_t *pgdat)
 	}
 
 	/* performs split */
-	if (!list_empty(&(&pn->deferred_split_queue)->split_queue)) {
+	if (htmm_mode == HTMM_HUGEPAGE_OPT &&
+		!list_empty(&(&pn->deferred_split_queue)->split_queue)) {
 	    unsigned long nr_splitted;
 	    nr_splitted = deferred_split_scan_for_htmm(pn);
 	    printk("nr_splitted by kpromoted: %lu\n", nr_splitted);

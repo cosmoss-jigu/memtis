@@ -3014,8 +3014,9 @@ bool numa_demotion_enabled = false;
 unsigned int htmm_sample_period = 10007;
 unsigned int htmm_thres_hot = 2;
 unsigned int htmm_thres_cold = 7;
-unsigned int htmm_thres_huge_hot = 2 * 1024 * (DELTA_CYCLES - DRAM_ACCESS_CYCLES);
+unsigned int htmm_thres_huge_hot = 22 * (DELTA_CYCLES - DRAM_ACCESS_CYCLES);
 unsigned int htmm_min_cooling_interval = 1000; /* in ms, 1s */
+unsigned int htmm_max_cooling_interval = 60000; /* in ms, 60s */
 unsigned int htmm_demotion_period_in_ms = 100;
 unsigned int htmm_promotion_period_in_ms = 100;
 unsigned int htmm_mode = 1;
@@ -3205,6 +3206,30 @@ static struct kobj_attribute htmm_min_cooling_interval_attr =
 	__ATTR(htmm_min_cooling_interval, 0644, htmm_min_cooling_interval_show,
 	       htmm_min_cooling_interval_store);
 
+static ssize_t htmm_max_cooling_interval_show(struct kobject *kobj,
+				    struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%u\n", htmm_max_cooling_interval);
+}
+
+static ssize_t htmm_max_cooling_interval_store(struct kobject *kobj,
+				     struct kobj_attribute *attr,
+				     const char *buf, size_t count)
+{
+	int err;
+	unsigned int interval;
+
+	err = kstrtouint(buf, 10, &interval);
+	if (err)
+		return err;
+
+	WRITE_ONCE(htmm_max_cooling_interval, interval);
+	return count;
+}
+
+static struct kobj_attribute htmm_max_cooling_interval_attr =
+	__ATTR(htmm_max_cooling_interval, 0644, htmm_max_cooling_interval_show,
+	       htmm_max_cooling_interval_store);
 
 static ssize_t htmm_demotion_period_show(struct kobject *kobj,
 				   struct kobj_attribute *attr, char *buf)
@@ -3300,6 +3325,7 @@ static struct attribute *htmm_attrs[] = {
 	&htmm_thres_hot_attr.attr,
 	&htmm_thres_cold_attr.attr,
 	&htmm_min_cooling_interval_attr.attr,
+	&htmm_max_cooling_interval_attr.attr,
 	&htmm_demotion_period_attr.attr,
 	&htmm_promotion_period_attr.attr,
 	&htmm_mode_attr.attr,

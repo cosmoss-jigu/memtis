@@ -2124,7 +2124,8 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 		    goto skip_copy_pginfo;
 
 		pte_pginfo->nr_accesses = tail_pginfo->nr_accesses;
-		ClearPageHtmm(&page[i]);
+		/* Htmm flag will be cleared later */
+		/* ClearPageHtmm(&page[i]); */
 	    }
 	}
 skip_copy_pginfo:
@@ -2364,7 +2365,11 @@ static void __split_huge_page_tail(struct page *head, int tail,
 		struct lruvec *lruvec, struct list_head *list)
 {
 	struct page *page_tail = head + tail;
-
+#ifdef CONFIG_HTMM
+	bool htmm_tail = PageHtmm(page_tail) ? true : false;
+#else
+	bool htmm_tail = false;
+#endif
 	VM_BUG_ON_PAGE(atomic_read(&page_tail->_mapcount) != -1, page_tail);
 
 	/*
@@ -2390,7 +2395,7 @@ static void __split_huge_page_tail(struct page *head, int tail,
 			 (1L << PG_dirty)));
 
 	/* ->mapping in first tail page is compound_mapcount */
-	VM_BUG_ON_PAGE(tail > 2 && page_tail->mapping != TAIL_MAPPING,
+	VM_BUG_ON_PAGE(tail > 2 && !htmm_tail && page_tail->mapping != TAIL_MAPPING,
 			page_tail);
 	page_tail->mapping = head->mapping;
 	page_tail->index = head->index + tail;
