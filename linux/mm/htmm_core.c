@@ -491,6 +491,68 @@ pte_unlock:
     pte_unmap_unlock(pte, ptl);
 }
 
+static void __update_pte_pginfo_loop(struct vm_area_struct *vma, pmd_t *pmd,
+				     unsigned long address)
+{
+    pte_t *pte, ptent;
+    spinlock_t *ptl;
+    pginfo_t *pginfo;
+    struct page *page, *pte_page;
+    unsigned long pg_offset = (address & ~HPAGE_PMD_MASK) >> PAGE_SHIFT;
+    unsigned long start, end;
+    int i;
+
+    if (pg_offset >= htmm_base_spatial_count)
+	start = address - (htmm_base_spatial_count << PAGE_SHIFT);
+    else
+	start = address - (pg_offset << PAGE_SHIFT);
+    
+    if (pg_offset < (HPAGE_PMD_NR - htmm_base_spatial_count))
+	end = address + (htmm_base_spatial_count << PAGE_SHIFT);
+    else
+	end = address + ((HPAGE_PMD_NR - pg_offset - 1) << PAGE_SHIFT);
+
+    pte = pte_offset_map_lock(vma->vm_mm, pmd, start, &ptl);
+    for (; start <= end; start += PAGE_SIZE, pte++) {
+	ptent = *pte;
+        if (!pte_present(ptent))
+	    continue;
+
+	page = vm_normal_page(vma, start, ptent);
+	if (!page || PageKsm(page))
+	    continue;
+
+	if (!PageLRU(page))
+	    continue;
+
+	pte_page = virt_to_page((unsigned long)pte);
+	if (!PageHtmm(pte_page))
+	    continue;
+
+	pginfo = get_pginfo_from_pte(pte);
+	if (!pginfo)
+	    continue;
+
+	pginfo->nr_accesses++;
+	if (pginfo->nr_accesses >= htmm_thres_hot) {
+	    bool newly_hot = false;
+	    if (!PageActive(page)) {
+		move_page_to_active_lru(page);
+		newly_hot = true;
+	    }
+	    if (htmm_mode == HTMM_HUGEPAGE_OPT &&
+		transhuge_vma_suitable(vma, start & HPAGE_PMD_MASK)) {
+		update_huge_region(vma, start & HPAGE_PMD_MASK, true);
+	    }
+	}
+
+	if (reach_cooling_thres(pginfo, NULL, false) && need_lru_cooling(vma->vm_mm, page))
+	    set_lru_cooling(vma->vm_mm);
+	}
+pte_unlock:
+    pte_unmap_unlock(--pte, ptl);
+}
+
 static void __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
 				unsigned long address)
 {
@@ -553,8 +615,8 @@ static void __update_pmd_pginfo(struct vm_area_struct *vma, pud_t *pud,
 		    move_page_to_active_lru(page);
 	    }
 
-	    if (is_hot_huge_page(meta_page))
-		printk("prev_hv: %lu,  cur_hv: %lu,  hot_utils: %lu,  total: %lu\n", meta_page->prev_hv, meta_page->cur_hv, meta_page->hot_utils, meta_page->total_accesses); 
+	    //if (is_hot_huge_page(meta_page))
+		//printk("prev_hv: %lu,  cur_hv: %lu,  hot_utils: %lu,  total: %lu\n", meta_page->prev_hv, meta_page->cur_hv, meta_page->hot_utils, meta_page->total_accesses); 
 	} else { /* HTMM_BASELINE */
 	    if (!PageActive(page) && meta_page->total_accesses >= htmm_thres_hot)
 		move_page_to_active_lru(page);
@@ -569,7 +631,10 @@ pmd_unlock:
 	return;
     }
     /* base page */
-    __update_pte_pginfo(vma, pmd, address);
+    if (htmm_base_spatial_count)
+	__update_pte_pginfo_loop(vma, pmd, address);
+    else
+	__update_pte_pginfo(vma, pmd, address);
 }
 
 static void __update_pginfo(struct vm_area_struct *vma, unsigned long address)

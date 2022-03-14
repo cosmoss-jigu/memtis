@@ -194,6 +194,7 @@ extern unsigned int htmm_min_cooling_interval;
 extern unsigned int htmm_max_cooling_interval;
 extern unsigned int htmm_demotion_period_in_ms;
 extern unsigned int htmm_promotion_period_in_ms;
+extern unsigned int htmm_base_spatial_count;
 extern unsigned int htmm_mode;
 #endif
 static inline bool mpol_is_preferred_many(struct mempolicy *pol)

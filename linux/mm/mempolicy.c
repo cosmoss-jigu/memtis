@@ -3015,10 +3015,11 @@ unsigned int htmm_sample_period = 10007;
 unsigned int htmm_thres_hot = 2;
 unsigned int htmm_thres_cold = 7;
 unsigned int htmm_thres_huge_hot = 22 * (DELTA_CYCLES - DRAM_ACCESS_CYCLES);
-unsigned int htmm_min_cooling_interval = 1000; /* in ms, 1s */
+unsigned int htmm_min_cooling_interval = 5000; /* in ms, 5s */
 unsigned int htmm_max_cooling_interval = 60000; /* in ms, 60s */
 unsigned int htmm_demotion_period_in_ms = 100;
 unsigned int htmm_promotion_period_in_ms = 100;
+unsigned int htmm_base_spatial_count = 1; 
 unsigned int htmm_mode = 1;
 #endif
 
@@ -3281,15 +3282,40 @@ static struct kobj_attribute htmm_promotion_period_attr =
 	__ATTR(htmm_promotion_period_in_ms, 0644, htmm_promotion_period_show,
 	       htmm_promotion_period_store);
 
+static ssize_t htmm_base_spatial_count_show(struct kobject *kobj,
+				   struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%u\n", htmm_base_spatial_count);
+}
+
+static ssize_t htmm_base_spatial_count_store(struct kobject *kobj,
+				    struct kobj_attribute *attr,
+				    const char *buf, size_t count)
+{
+	int err;
+	unsigned int sp_count;
+
+	err = kstrtouint(buf, 10, &sp_count);
+	if (err)
+		return err;
+
+	WRITE_ONCE(htmm_base_spatial_count, sp_count);
+	return count;
+}
+
+static struct kobj_attribute htmm_base_spatial_count_attr =
+	__ATTR(htmm_base_spatial_count, 0644, htmm_base_spatial_count_show,
+	       htmm_base_spatial_count_store);
+
 static ssize_t htmm_mode_show(struct kobject *kobj,
 			      struct kobj_attribute *attr, char *buf)
 {
 	if (htmm_mode == HTMM_NO_MIG)
-		return sysfs_emit(buf, "%s\n", "NO MIGRATION [0]");
+		return sysfs_emit(buf, "%s\n", "[NO MIG-0], BASELINE-1, HUGEPAGE_OPT-2");
 	else if (htmm_mode == HTMM_BASELINE)
-		return sysfs_emit(buf, "%s\n", "NORMAL TMM BASELINE [1]");
+		return sysfs_emit(buf, "%s\n", "NO MIG-0, [BASELINE-1], HUGEPAGE_OPT-2");
 	else /* htmm_mode == HTMM_HUGEPAGE_OPT */
-		return sysfs_emit(buf, "%s\n", "HUGEPAGE OPTIMIZED [2]");
+		return sysfs_emit(buf, "%s\n", "NO MIG-0, BASELINE-1, [HUGEPAGE_OPT-2]");
 }
 
 static ssize_t htmm_mode_store(struct kobject *kobj,
@@ -3328,6 +3354,7 @@ static struct attribute *htmm_attrs[] = {
 	&htmm_max_cooling_interval_attr.attr,
 	&htmm_demotion_period_attr.attr,
 	&htmm_promotion_period_attr.attr,
+	&htmm_base_spatial_count_attr.attr,
 	&htmm_mode_attr.attr,
 	NULL,
 };
