@@ -18,6 +18,7 @@
 #define HTMM_NO_MIG	    0x0
 #define	HTMM_BASELINE	    0x1
 #define HTMM_HUGEPAGE_OPT   0x2
+#define HTMM_HUGEPAGE_OPT_V2	0x3
 
 /**/
 #define DRAM_ACCESS_CYCLES  150
@@ -70,7 +71,11 @@ extern unsigned long deferred_split_scan_for_htmm(struct mem_cgroup_per_node *pn
 extern struct page *get_meta_page(struct page *page);
 extern long cal_huge_hotness(struct mem_cgroup *memcg, void *meta, bool huge);
 extern bool is_hot_huge_page(struct page *meta);
+extern bool is_hot_huge_page_v2(struct page *meta);
 extern enum region_list hugepage_type(struct page *page);
+
+extern void adjust_active_threshold(pid_t pid);
+extern void set_lru_cooling_pid(pid_t pid);
 
 extern struct kmem_cache *huge_region_cachep;
 

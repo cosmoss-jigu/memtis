@@ -166,6 +166,13 @@ static int ksamplingd(void *data)
 			update_pginfo(he->pid, he->addr);
 			count_vm_event(HTMM_NR_SAMPLED);
 			nr_sampled++;
+
+			if (htmm_mode == HTMM_HUGEPAGE_OPT_V2) {
+			    if (nr_sampled % htmm_thres_adjust == 0)
+				adjust_active_threshold(he->pid);
+			    if (nr_sampled % htmm_thres_cold == 0)
+				set_lru_cooling_pid(he->pid);
+			}
 			break;
 		    case PERF_RECORD_THROTTLE:
 		    case PERF_RECORD_UNTHROTTLE:

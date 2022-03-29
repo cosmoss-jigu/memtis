@@ -145,6 +145,7 @@ struct mem_cgroup_per_node {
 	unsigned long		max_nr_base_pages; /* Set by "max_at_node" param */
 	struct list_head	kmigraterd_list;
 	bool			need_cooling;
+	bool			need_adjusting;
 	struct deferred_split deferred_split_queue;
 #endif
 	struct mem_cgroup_reclaim_iter	iter;
@@ -357,6 +358,8 @@ struct mem_cgroup {
 	unsigned long max_nr_dram_pages;
 	unsigned long nr_active_pages; /* updated by need_lru_cooling() */
 	unsigned long htmm_next_cooling;
+	unsigned long nr_sampled;
+	unsigned int active_threshold;
 #endif
 
 	struct mem_cgroup_per_node *nodeinfo[];

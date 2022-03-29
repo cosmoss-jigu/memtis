@@ -67,6 +67,7 @@
 #include <net/ip.h>
 #include "slab.h"
 
+#include <linux/mempolicy.h>
 #include <linux/htmm.h>
 #include <linux/uaccess.h>
 
@@ -5130,6 +5131,7 @@ static int alloc_mem_cgroup_per_node_info(struct mem_cgroup *memcg, int node)
 	pn->max_nr_base_pages = ULONG_MAX;
 	INIT_LIST_HEAD(&pn->kmigraterd_list);
 	pn->need_cooling = false;
+	pn->need_adjusting = false;
 	spin_lock_init(&pn->deferred_split_queue.split_queue_lock);
 	INIT_LIST_HEAD(&pn->deferred_split_queue.split_queue);
 	pn->deferred_split_queue.split_queue_len = 0;
@@ -5233,6 +5235,8 @@ static struct mem_cgroup *mem_cgroup_alloc(void)
 	memcg->max_nr_dram_pages = ULONG_MAX;
 	memcg->nr_active_pages = 0;
 	memcg->htmm_next_cooling = jiffies + msecs_to_jiffies(1000);
+	memcg->nr_sampled = 0;
+	memcg->active_threshold = htmm_thres_hot;
 #endif
 	idr_replace(&mem_cgroup_idr, memcg, memcg->id.id);
 	return memcg;

@@ -176,6 +176,11 @@ static bool need_lru_cooling(struct mem_cgroup_per_node *pn)
     return READ_ONCE(pn->need_cooling);
 }
 
+static bool need_lru_adjusting(struct mem_cgroup_per_node *pn)
+{
+    return READ_ONCE(pn->need_adjusting);
+}
+
 static __always_inline void update_lru_sizes(struct lruvec *lruvec,
 	enum lru_list lru, unsigned long *nr_zone_taken)
 {
@@ -464,7 +469,6 @@ static unsigned long demote_lruvec(unsigned long nr_to_reclaim, short priority,
 static unsigned long promote_lruvec(unsigned long nr_to_promote, short priority,
 	pg_data_t *pgdat, struct lruvec *lruvec)
 {
-    enum lru_list lru;
     unsigned long nr_promoted = 0, nr;
     
     nr = nr_to_promote >> priority;
@@ -567,6 +571,8 @@ static void cooling_active_list(unsigned long nr_to_scan,
 
 	    still_hot = cooling_page(page, lruvec_memcg(lruvec));
 	    if (still_hot) { /* hot pages after cooling */
+		if (!PageActive(page))
+		    SetPageActive(page);
 		list_add(&page->lru, &l_active);
 		continue;
 	    }
@@ -585,9 +591,14 @@ static void cooling_active_list(unsigned long nr_to_scan,
 	    continue;
 	}
 
+	if (htmm_mode == HTMM_HUGEPAGE_OPT_V2) {
+	    list_add(&page->lru, &l_inactive);
+	    continue;
+	}
+
 	switch (hugepage_type(page)) {
 	    case BASE_PAGES:
-		deferred_split_huge_page_for_htmm(page);
+		//deferred_split_huge_page_for_htmm(page);
 	    case HUGE_LOWERTIER:
 		list_add(&page->lru, &l_inactive);
 		break;
@@ -611,27 +622,119 @@ static void cooling_active_list(unsigned long nr_to_scan,
     free_unref_page_list(&l_active);
 }
 
-static void cooling_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
+static void cooling_node(pg_data_t *pgdat, struct mem_cgroup *memcg, bool v2)
 {
     unsigned long nr_to_scan, nr_scanned = 0;
     struct lruvec *lruvec = mem_cgroup_lruvec(memcg, pgdat);
     struct mem_cgroup_per_node *pn = memcg->nodeinfo[pgdat->node_id];
+    enum lru_list lru = LRU_ACTIVE_ANON; 
 
-    nr_to_scan = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
+re_cooling:
+    nr_to_scan = lruvec_lru_size(lruvec, lru, MAX_NR_ZONES);
     do {
 	unsigned long scan = nr_to_scan >> 3; /* 12.5% */
 
 	if (!scan)
 	    scan = nr_to_scan;
 	/* limits the num. of scanned pages to reduce the lock holding time */
-	cooling_active_list(scan, lruvec, LRU_ACTIVE_ANON);
+	cooling_active_list(scan, lruvec, lru);
 	nr_scanned += scan;
     } while (nr_scanned < nr_to_scan);
+
+    if (v2 && is_active_lru(lru)) {
+	lru = LRU_INACTIVE_ANON;
+	goto re_cooling;
+    }
 
     /* active file list */
     cooling_active_list(lruvec_lru_size(lruvec, LRU_ACTIVE_FILE, MAX_NR_ZONES),
 					lruvec, LRU_ACTIVE_FILE);
     WRITE_ONCE(pn->need_cooling, false);
+}
+
+static void adjusting_lru_list(unsigned long nr_to_scan,
+	struct lruvec *lruvec, enum lru_list lru)
+{
+    unsigned long nr_taken;
+    pg_data_t *pgdat = lruvec_pgdat(lruvec);
+    LIST_HEAD(l_hold);
+    LIST_HEAD(l_active);
+    LIST_HEAD(l_inactive);
+    int file = is_file_lru(lru);
+    bool active = is_active_lru(lru);
+
+    if (file)
+	return;
+
+    lru_add_drain();
+
+    spin_lock_irq(&lruvec->lru_lock);
+    nr_taken = isolate_lru_pages(nr_to_scan, lruvec, lru, &l_hold, 0);
+    __mod_node_page_state(pgdat, NR_ISOLATED_ANON, nr_taken);
+    spin_unlock_irq(&lruvec->lru_lock);
+
+    cond_resched();
+    while (!list_empty(&l_hold)) {
+	struct page *page;
+
+	page = lru_to_page(&l_hold);
+	list_del(&page->lru);
+
+	if (unlikely(!page_evictable(page))) {
+	    putback_lru_page(page);
+	    continue;
+	}
+
+	if (page_check_hotness(page, lruvec_memcg(lruvec))) {
+	    if (active) {
+		list_add(&page->lru, &l_active);
+		continue;
+	    }
+
+	    SetPageActive(page);
+	    list_add(&page->lru, &l_active);
+	} else {
+	    if (!active) {
+		list_add(&page->lru, &l_inactive);
+		continue;
+	    }
+
+	    ClearPageActive(page);
+	    SetPageWorkingset(page);
+	    list_add(&page->lru, &l_inactive);
+	}
+    }
+
+    spin_lock_irq(&lruvec->lru_lock);
+    move_pages_to_lru(lruvec, &l_active);
+    move_pages_to_lru(lruvec, &l_inactive);
+    list_splice(&l_inactive, &l_active);
+
+    __mod_node_page_state(pgdat, NR_ISOLATED_ANON, -nr_taken);
+    spin_unlock_irq(&lruvec->lru_lock);
+
+    mem_cgroup_uncharge_list(&l_active);
+    free_unref_page_list(&l_active);
+}
+
+static void adjusting_node(pg_data_t *pgdat, struct mem_cgroup *memcg, bool active)
+{
+    struct lruvec *lruvec = mem_cgroup_lruvec(memcg, pgdat);
+    struct mem_cgroup_per_node *pn = memcg->nodeinfo[pgdat->node_id];
+    enum lru_list lru = active ? LRU_ACTIVE_ANON : LRU_INACTIVE_ANON;
+    unsigned long nr_to_scan, nr_scanned = 0;
+
+    nr_to_scan = lruvec_lru_size(lruvec, lru, MAX_NR_ZONES);
+    do {
+	unsigned long scan = nr_to_scan >> 3;
+
+	if (!scan)
+	    scan = nr_to_scan;
+	adjusting_lru_list(scan, lruvec, lru);
+	nr_scanned += scan;
+    } while (nr_scanned < nr_to_scan);
+    
+    WRITE_ONCE(pn->need_adjusting, false);
 }
 
 static struct mem_cgroup_per_node *next_memcg_cand(pg_data_t *pgdat)
@@ -689,7 +792,12 @@ static int kmigraterd_demotion(pg_data_t *pgdat)
 
 	/* performs cooling */
 	if (need_lru_cooling(pn)) {
-	    cooling_node(pgdat, memcg);
+	    if (htmm_mode == HTMM_HUGEPAGE_OPT)
+		cooling_node(pgdat, memcg, false);
+	    else if (htmm_mode == HTMM_HUGEPAGE_OPT_V2)
+		cooling_node(pgdat, memcg, true);
+	} else if (need_lru_adjusting(pn)) {
+	    adjusting_node(pgdat, memcg, true);
 	}
 
 	/* performs split */
@@ -745,7 +853,14 @@ static int kmigraterd_promotion(pg_data_t *pgdat)
 	}
 	
 	if (need_lru_cooling(pn)) {
-	    cooling_node(pgdat, memcg);
+	    if (htmm_mode == HTMM_HUGEPAGE_OPT)
+		cooling_node(pgdat, memcg, false);
+	    else if (htmm_mode == HTMM_HUGEPAGE_OPT_V2)
+		cooling_node(pgdat, memcg, true);
+
+	} else if (need_lru_adjusting(pn)) {
+	    adjusting_node(pgdat, memcg, true);
+	    //adjusting_node(pgdat, memcg, false);
 	}
 
 	/* performs split */
