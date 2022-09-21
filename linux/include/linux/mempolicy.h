@@ -187,6 +187,7 @@ extern void mpol_put_task_policy(struct task_struct *);
 extern bool numa_demotion_enabled;
 #ifdef CONFIG_HTMM
 extern unsigned int htmm_sample_period;
+extern unsigned int htmm_inst_sample_period;
 extern unsigned int htmm_thres_huge_hot;
 extern unsigned int htmm_thres_hot;
 extern unsigned int htmm_thres_cold;
@@ -195,7 +196,10 @@ extern unsigned int htmm_max_cooling_interval;
 extern unsigned int htmm_demotion_period_in_ms;
 extern unsigned int htmm_promotion_period_in_ms;
 extern unsigned int htmm_base_spatial_count;
+extern unsigned int htmm_thres_split;
+extern unsigned int htmm_static_thres;
 extern unsigned int htmm_thres_adjust;
+extern unsigned int htmm_util_weight;
 extern unsigned int htmm_mode;
 #endif
 static inline bool mpol_is_preferred_many(struct mempolicy *pol)

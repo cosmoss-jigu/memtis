@@ -282,7 +282,7 @@ typedef struct pgprot { pgprotval_t pgprot; } pgprot_t;
 typedef struct { pgdval_t pgd; } pgd_t;
 
 #ifdef CONFIG_HTMM /* pginfo_t */
-typedef struct { uint32_t nr_accesses; } pginfo_t;
+typedef struct { uint32_t total_accesses; uint16_t nr_accesses; uint8_t cooling_clock; bool may_hot; } pginfo_t;
 #endif
 
 static inline pgprot_t pgprot_nx(pgprot_t prot)

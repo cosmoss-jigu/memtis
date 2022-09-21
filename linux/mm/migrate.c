@@ -252,6 +252,29 @@ static bool remove_migration_pte(struct page *page, struct vm_area_struct *vma,
 			else
 				page_add_file_rmap(new, false);
 		}
+#ifdef CONFIG_HTMM /* remove_migration_pte() */
+		{
+
+			struct mem_cgroup *memcg = page_memcg(pvmw.page);
+			struct page *pte_page;
+			spinlock_t *ptl;
+			pginfo_t *pginfo;
+
+			if (!memcg || !memcg->htmm_enabled)
+			    goto out_cooling_check;
+
+			pte_page = virt_to_page((unsigned long)pvmw.pte);
+			if (!PageHtmm(pte_page))
+			    goto out_cooling_check;
+			
+			pginfo = get_pginfo_from_pte(pvmw.pte);
+			if (!pginfo)
+			    goto out_cooling_check;
+
+			check_base_cooling(pginfo, new, true);
+		}
+out_cooling_check:
+#endif
 		if (vma->vm_flags & VM_LOCKED && !PageTransCompound(new))
 			mlock_vma_page(new);
 

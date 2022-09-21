@@ -1,9 +1,10 @@
-
 #include <uapi/linux/perf_event.h>
+
+#define DEFERRED_SPLIT_ISOLATED 1
 
 #define BUFFER_SIZE	512 /* 1MB */
 #define CPUS_PER_SOCKET 20
-#define MAX_MIGRATION_RATE_IN_MBPS  100 /* 100MB per sec */
+#define MAX_MIGRATION_RATE_IN_MBPS  1024 /* 1024MB per sec */
 
 
 /* pebs events */
@@ -50,30 +51,57 @@ typedef struct huge_region {
     unsigned long haddr;
     unsigned int hot_utils;
     unsigned int total_accesses;
-    unsigned int cur_hv;
-    unsigned int prev_hv;
+    unsigned int cooling_clock;
 } huge_region_t;
 
 /* htmm_core.c */
 extern void htmm_mm_init(struct mm_struct *mm);
+extern void htmm_mm_exit(struct mm_struct *mm);
 extern void __prep_transhuge_page_for_htmm(struct page *page);
 extern void prep_transhuge_page_for_htmm(struct vm_area_struct *vma,
 					 struct page *page);
+extern void clear_transhuge_pginfo(struct page *page);
 extern void copy_transhuge_pginfo(struct page *page,
 				  struct page *newpage);
 extern pginfo_t *get_compound_pginfo(struct page *page, unsigned long address);
-extern void update_pginfo(pid_t pid, unsigned long address);
+
+extern void check_transhuge_cooling(void *arg, struct page *page, bool locked);
+extern void check_base_cooling(pginfo_t *pginfo, struct page *page, bool locked);
+extern void set_page_coolstatus(struct page *page, pte_t *pte, struct mm_struct *mm);
+
+extern void set_lru_adjusting(struct mem_cgroup *memcg, bool inc_thres);
+
+extern void update_pginfo(pid_t pid, unsigned long address, enum events e);
 extern bool region_for_toptier(huge_region_t *region);
 
-extern void deferred_split_huge_page_for_htmm(struct page *page);
-extern unsigned long deferred_split_scan_for_htmm(struct mem_cgroup_per_node *pn);
+extern bool deferred_split_huge_page_for_htmm(struct page *page);
+extern unsigned long deferred_split_scan_for_htmm(struct mem_cgroup_per_node *pn,
+						  struct list_head *split_list);
+extern void putback_split_pages(struct list_head *split_list, struct lruvec *lruvec);
+
+extern bool check_split_huge_page(struct mem_cgroup *memcg, struct page *meta, bool hot);
+extern bool move_page_to_deferred_split_queue(struct mem_cgroup *memcg, struct page *page);
+
+extern void move_page_to_active_lru(struct page *page);
+extern void move_page_to_inactive_lru(struct page *page);
+
 
 extern struct page *get_meta_page(struct page *page);
+extern unsigned int get_accesses_from_idx(unsigned int idx);
+extern unsigned int get_idx(unsigned long num);
+extern int get_base_idx(unsigned int num);
+extern int get_skew_idx(unsigned int num);
+extern unsigned int get_weight(uint8_t history);
+extern void uncharge_htmm_pte(pte_t *pte, struct mem_cgroup *memcg);
+extern void uncharge_htmm_page(struct page *page, struct mem_cgroup *memcg);
+extern void charge_htmm_page(struct page *page, struct mem_cgroup *memcg);
+
 extern long cal_huge_hotness(struct mem_cgroup *memcg, void *meta, bool huge);
 extern bool is_hot_huge_page(struct page *meta);
 extern bool is_hot_huge_page_v2(struct page *meta);
 extern enum region_list hugepage_type(struct page *page);
 
+extern void set_lru_split_pid(pid_t pid);
 extern void adjust_active_threshold(pid_t pid);
 extern void set_lru_cooling_pid(pid_t pid);
 
@@ -96,3 +124,7 @@ extern unsigned long get_nr_lru_pages_node(struct mem_cgroup *memcg, pg_data_t *
 extern void add_memcg_to_kmigraterd(struct mem_cgroup *memcg, int nid);
 extern void del_memcg_from_kmigraterd(struct mem_cgroup *memcg, int nid);
 extern int kmigraterd_init(void);
+
+/* htmm_cooler.c */
+extern void register_memcg_for_cooling(struct mem_cgroup *memcg);
+extern int kcoolingd_init(void);

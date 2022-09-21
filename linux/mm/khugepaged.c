@@ -2384,7 +2384,7 @@ static void khugepaged_wait_work(void)
 
 #ifdef CONFIG_HTMM
 
-static huge_region_t *get_huge_region(struct mm_struct *mm)
+huge_region_t *get_huge_region(struct mm_struct *mm)
 {
     huge_region_t *node = NULL;
     int i;
@@ -2393,33 +2393,36 @@ static huge_region_t *get_huge_region(struct mm_struct *mm)
 	return NULL;
 
     spin_lock(&mm->hri.lock);
+#if 0
     for (i = HUGE_TOPTIER; i <= HUGE_LOWERTIER; i++) {
 	if (list_empty(&mm->hri.region_list[i]))
 	    continue;
 	goto found;
     }
-    goto no_region;
-
-found:
-    node = list_first_entry(&mm->hri.region_list[i], huge_region_t, hr_entry);
-    list_del(&node->hr_entry);
+#endif
+    if (list_empty(&mm->hri.region_list[HUGE_TOPTIER]))
+	goto no_region;
+//found:
+    node = list_first_entry(&mm->hri.region_list[HUGE_TOPTIER], huge_region_t, hr_entry);
+    if (!node)
+	list_del(&node->hr_entry);
 
 no_region:
     spin_unlock(&mm->hri.lock);
     return node;
 }
 
-static void putback_huge_region(struct mm_struct *mm, huge_region_t *node)
+void putback_huge_region(struct mm_struct *mm, huge_region_t *node)
 {
     spin_lock(&mm->hri.lock);
-    if (region_for_toptier(node))
+    //if (region_for_toptier(node))
 	list_add_tail(&node->hr_entry, &mm->hri.region_list[HUGE_TOPTIER]);
-    else
-	list_add_tail(&node->hr_entry, &mm->hri.region_list[HUGE_LOWERTIER]);
+    //else
+//	list_add_tail(&node->hr_entry, &mm->hri.region_list[HUGE_LOWERTIER]);
     spin_unlock(&mm->hri.lock);
 }
 
-static struct mm_struct *khugepaged_get_target_mm(void)
+struct mm_struct *khugepaged_get_target_mm(void)
     __releases(&khugepaged_mm_lock)
     __acquires(&khugepaged_mm_lock)
 {
@@ -2439,7 +2442,7 @@ static struct mm_struct *khugepaged_get_target_mm(void)
 	    goto get_mm_out;
 	}
     }
-
+#if 0
     list_for_each_safe (tmp, temp, &khugepaged_scan.mm_head) {
 	mm_slot = list_entry(tmp, struct mm_slot, mm_node);
 	mm_tmp = mm_slot->mm;
@@ -2450,14 +2453,14 @@ static struct mm_struct *khugepaged_get_target_mm(void)
 	    goto get_mm_out;
 	}
     }
-
+#endif
 get_mm_out:
 	spin_unlock(&khugepaged_mm_lock);
 	return mm;
 }
 
 #define HTMM_NO_WORK	99999
-static unsigned int htmm_scan_mm(struct mm_struct *mm,
+unsigned int htmm_scan_mm(struct mm_struct *mm,
 	unsigned int pages, struct page **hpage)
 {
     struct vm_area_struct *vma;
@@ -2486,6 +2489,7 @@ static unsigned int htmm_scan_mm(struct mm_struct *mm,
 	    mmap_read_unlock(mm);
 	    huge_region_delete(mm, address);
 	    huge_region_free(node);
+	    continue;
 	}
 
 	if (shmem_file(vma->vm_file) && !shmem_huge_enabled(vma)) {
@@ -2493,6 +2497,7 @@ static unsigned int htmm_scan_mm(struct mm_struct *mm,
 	    mmap_read_unlock(mm);
 	    huge_region_delete(mm, address);
 	    huge_region_free(node);
+	    continue;
 	}
 
 	VM_BUG_ON(address & ~HPAGE_PMD_MASK);
@@ -2501,6 +2506,7 @@ static unsigned int htmm_scan_mm(struct mm_struct *mm,
 	    struct file *file = get_file(vma->vm_file);
 	    pgoff_t pgoff = linear_page_index(vma, address);
 	    mmap_read_unlock(mm);
+	    printk("khugepaged_scan_file() invoked\n");
 	    ret = khugepaged_scan_file(mm, file, pgoff, hpage, node);
 	} else
 	    ret = khugepaged_scan_pmd(mm, vma, address, hpage, node);
@@ -2528,7 +2534,7 @@ return_and_try_next_mm:
     return progress;
 }
 
-static void khugepaged_region_scan(void)
+void khugepaged_region_scan(void)
 {
     struct page *hpage = NULL;
     struct mm_struct *mm = NULL;
@@ -2560,7 +2566,6 @@ static void khugepaged_region_scan(void)
 		else
 		    progress = pages;
 	    } else progress = pages;
-	    continue;
 	}
 	else
 	    progress = pages;

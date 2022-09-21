@@ -500,13 +500,24 @@ pmd_t maybe_pmd_mkwrite(pmd_t pmd, struct vm_area_struct *vma)
 }
 
 #ifdef CONFIG_MEMCG
-static inline struct deferred_split *get_deferred_split_queue(struct page *page)
+struct deferred_split *get_deferred_split_queue(struct page *page)
 {
 	struct mem_cgroup *memcg = page_memcg(compound_head(page));
 	struct pglist_data *pgdat = NODE_DATA(page_to_nid(page));
 
 	if (memcg)
+#ifdef CONFIG_HTMM
+	{
+		if (memcg->htmm_enabled) {
+			struct mem_cgroup_per_node *pn = memcg->nodeinfo[page_to_nid(page)];
+			return &pn->deferred_split_queue;
+		}
+		else
+		    return &memcg->deferred_split_queue;
+	}
+#else
 		return &memcg->deferred_split_queue;
+#endif
 	else
 		return &pgdat->deferred_split_queue;
 }
@@ -1615,6 +1626,9 @@ int zap_huge_pmd(struct mmu_gather *tlb, struct vm_area_struct *vma,
 
 		if (pmd_present(orig_pmd)) {
 			page = pmd_page(orig_pmd);
+#ifdef CONFIG_HTMM
+			uncharge_htmm_page(page, get_mem_cgroup_from_mm(vma->vm_mm));
+#endif
 			page_remove_rmap(page, true);
 			VM_BUG_ON_PAGE(page_mapcount(page) < 0, page);
 			VM_BUG_ON_PAGE(!PageHead(page), page);
@@ -2113,17 +2127,33 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 #ifdef CONFIG_HTMM
 	/* pginfo-s managed by the huge page should be copied into pte->pginfo*/
 	if (PageHtmm(&page[3])) {
+	    struct mem_cgroup *memcg = get_mem_cgroup_from_mm(mm);
 	    pte_t *pte = pte_offset_map(&_pmd, haddr);
-	    
+	
+	    SetPageHtmm(&page[0]);
+
 	    for (i = 0, addr = haddr; i < HPAGE_PMD_NR; i++, addr += PAGE_SIZE) {
 		pginfo_t *pte_pginfo, *tail_pginfo;
 
 		pte_pginfo = get_pginfo_from_pte(&pte[i]);
 		tail_pginfo = get_compound_pginfo(page, addr);
-		if (!pte_pginfo || !tail_pginfo)
+		if (!pte_pginfo || !tail_pginfo) {
+		    printk("split - pginfo - none...\n");
 		    goto skip_copy_pginfo;
+		}
 
 		pte_pginfo->nr_accesses = tail_pginfo->nr_accesses;
+		pte_pginfo->total_accesses = tail_pginfo->total_accesses;
+		pte_pginfo->cooling_clock = tail_pginfo->cooling_clock;
+		
+		if (get_idx(pte_pginfo->total_accesses) >= (memcg->active_threshold - 1))
+		    SetPageActive(&page[i]);
+		else
+		    ClearPageActive(&page[i]);
+
+		spin_lock(&memcg->access_lock);
+		memcg->bp_hotness_hg[get_idx(pte_pginfo->total_accesses)]++;
+		spin_unlock(&memcg->access_lock);
 		/* Htmm flag will be cleared later */
 		/* ClearPageHtmm(&page[i]); */
 	    }
@@ -2367,8 +2397,10 @@ static void __split_huge_page_tail(struct page *head, int tail,
 	struct page *page_tail = head + tail;
 #ifdef CONFIG_HTMM
 	bool htmm_tail = PageHtmm(page_tail) ? true : false;
+	bool htmm_active_tail = PageHtmm(head) && PageActive(page_tail);
 #else
 	bool htmm_tail = false;
+	bool htmm_active_tail = false;
 #endif
 	VM_BUG_ON_PAGE(atomic_read(&page_tail->_mapcount) != -1, page_tail);
 
@@ -2392,11 +2424,23 @@ static void __split_huge_page_tail(struct page *head, int tail,
 #ifdef CONFIG_64BIT
 			 (1L << PG_arch_2) |
 #endif
+#ifdef CONFIG_HTMM
+			// (1L << PG_htmm) |
+#endif
 			 (1L << PG_dirty)));
 
 	/* ->mapping in first tail page is compound_mapcount */
-	VM_BUG_ON_PAGE(tail > 2 && !htmm_tail && page_tail->mapping != TAIL_MAPPING,
-			page_tail);
+	//VM_BUG_ON_PAGE(tail > 2 && !PageHtmm(head) && !htmm_tail && page_tail->mapping != TAIL_MAPPING,
+//			page_tail);
+
+#ifdef CONFIG_HTMM
+	if (htmm_tail)
+	    clear_transhuge_pginfo(page_tail);
+	if (htmm_active_tail)
+	    SetPageActive(page_tail);
+	else
+	    ClearPageActive(page_tail);
+#endif
 	page_tail->mapping = head->mapping;
 	page_tail->index = head->index + tail;
 
@@ -2473,7 +2517,9 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 					head + i, 0);
 		}
 	}
-
+#ifdef CONFIG_HTMM
+	ClearPageHtmm(head);
+#endif
 	ClearPageCompound(head);
 	unlock_page_lruvec(lruvec);
 	/* Caller disabled irqs, so they are still disabled here */
@@ -2739,7 +2785,21 @@ int split_huge_page_to_list(struct page *page, struct list_head *list)
 				filemap_nr_thps_dec(mapping);
 			}
 		}
+#ifdef CONFIG_HTMM
+		{
+		    struct mem_cgroup *memcg = page_memcg(head);
+		    unsigned int idx;
 
+		    spin_lock(&memcg->access_lock);
+		    idx = head[3].idx;
+
+		    if (memcg->hp_hotness_hg[idx] < HPAGE_PMD_NR)
+			memcg->hp_hotness_hg[idx] = 0;
+		    else
+			memcg->hp_hotness_hg[idx] -= HPAGE_PMD_NR;
+		    spin_unlock(&memcg->access_lock);
+		}
+#endif
 		__split_huge_page(page, list, end);
 		ret = 0;
 	} else {
@@ -2749,6 +2809,19 @@ fail:
 			xa_unlock(&mapping->i_pages);
 		local_irq_enable();
 		remap_page(head, thp_nr_pages(head));
+#if 0 //def CONFIG_HTMM
+		{
+		    struct mem_cgroup *memcg = page_memcg(head);
+		    if (memcg->htmm_enabled) {
+			spin_lock(&ds_queue->split_queue_lock);
+			if (!list_empty(page_deferred_list(head))) {
+			    ds_queue->split_queue_len--;
+			    list_del(page_deferred_list(head));
+			}
+			spin_unlock(&ds_queue->split_queue_lock);
+		    }
+		}
+#endif
 		ret = -EBUSY;
 	}
 
@@ -2841,8 +2914,58 @@ static unsigned long deferred_split_scan(struct shrinker *shrink,
 #ifdef CONFIG_MEMCG
 	if (sc->memcg)
 		ds_queue = &sc->memcg->deferred_split_queue;
-#endif
+#ifdef CONFIG_HTMM
+	if (sc->memcg) {
+	    int nid, nr_nonempty = 0;
+	    
+	    for_each_node_state(nid, N_MEMORY) {
+		struct mem_cgroup_per_node *pn = sc->memcg->nodeinfo[nid];
+		struct deferred_split *pn_ds_queue = &pn->deferred_split_queue;
+		
+		if (list_empty(&pn_ds_queue->split_queue))
+		    continue;
+		
+		spin_lock_irqsave(&pn_ds_queue->split_queue_lock, flags);
+		list_for_each_safe(pos, next, &pn_ds_queue->split_queue) {
+		    page = list_entry((void *)pos, struct page, deferred_list);
+		    page = compound_head(page);
+		    if (get_page_unless_zero(page))
+			list_move(page_deferred_list(page), &list);
+		    else {
+			list_del_init(page_deferred_list(page));
+			pn_ds_queue->split_queue_len--;
+		    }
+		    if (!--sc->nr_to_scan)
+			break;
+		}
+		spin_unlock_irqrestore(&pn_ds_queue->split_queue_lock, flags);
+		    list_for_each_safe(pos, next, &list) {
+			page = list_entry((void *)pos, struct page, deferred_list);
+			if (!trylock_page(page))
+			    goto next;
+			/* split_huge_page() removes page from list on success */
+			if (!split_huge_page(page))
+			    split++;
+			unlock_page(page);
+next:
+			put_page(page);
+		}
 
+		spin_lock_irqsave(&pn_ds_queue->split_queue_lock, flags);
+		list_splice_tail(&list, &pn_ds_queue->split_queue);
+		spin_unlock_irqrestore(&pn_ds_queue->split_queue_lock, flags);
+
+		if (!list_empty(&pn_ds_queue->split_queue))
+		    nr_nonempty++;
+	    }
+	    
+	    if (!split && !nr_nonempty)
+		return SHRINK_STOP;
+	}
+	return split;
+#endif
+#endif
+#ifndef CONFIG_HTMM
 	spin_lock_irqsave(&ds_queue->split_queue_lock, flags);
 	/* Take pin on all head pages to avoid freeing them under us */
 	list_for_each_safe(pos, next, &ds_queue->split_queue) {
@@ -2883,6 +3006,7 @@ next:
 	if (!split && list_empty(&ds_queue->split_queue))
 		return SHRINK_STOP;
 	return split;
+#endif
 }
 
 static struct shrinker deferred_split_shrinker = {
@@ -3230,6 +3354,11 @@ void remove_migration_pmd(struct page_vma_mapped_walk *pvmw, struct page *new)
 	else
 		page_add_file_rmap(new, true);
 	set_pmd_at(mm, mmun_start, pvmw->pmd, pmde);
+#ifdef CONFIG_HTMM
+	{
+	    check_transhuge_cooling(NULL, new, true);
+	}
+#endif
 	if ((vma->vm_flags & VM_LOCKED) && !PageDoubleMap(new))
 		mlock_vma_page(new);
 	update_mmu_cache_pmd(vma, address, pvmw->pmd);

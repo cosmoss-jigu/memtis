@@ -1365,6 +1365,9 @@ const char * const vmstat_text[] = {
 	"htmm_nr_promoted",
 	"htmm_nr_demoted",
 	"htmm_nr_sampled",
+	"htmm_missed_dramread",
+	"htmm_missed_nvmread",
+	"htmm_missed_write",
 #endif
 #endif /* CONFIG_MEMORY_BALLOON */
 #ifdef CONFIG_DEBUG_TLBFLUSH

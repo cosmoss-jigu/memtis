@@ -3011,16 +3011,20 @@ void mpol_to_str(char *buffer, int maxlen, struct mempolicy *pol)
 
 bool numa_demotion_enabled = false;
 #ifdef CONFIG_HTMM /* sysfs htmm */
-unsigned int htmm_sample_period = 10007;
+unsigned int htmm_sample_period = 401;
+unsigned int htmm_inst_sample_period = 10007;
 unsigned int htmm_thres_hot = 2;
-unsigned int htmm_thres_cold = 7;
+unsigned int htmm_thres_cold = 2000000;
 unsigned int htmm_thres_huge_hot = 22 * (DELTA_CYCLES - DRAM_ACCESS_CYCLES);
 unsigned int htmm_min_cooling_interval = 5000; /* in ms, 5s */
 unsigned int htmm_max_cooling_interval = 60000; /* in ms, 60s */
 unsigned int htmm_demotion_period_in_ms = 100;
 unsigned int htmm_promotion_period_in_ms = 100;
 unsigned int htmm_base_spatial_count = 0;
-unsigned int htmm_thres_adjust = 300000;
+unsigned int htmm_thres_split = 6; 
+unsigned int htmm_static_thres = 0;
+unsigned int htmm_thres_adjust = 100000;
+unsigned int htmm_util_weight = 10;
 unsigned int htmm_mode = 1;
 #endif
 
@@ -3106,6 +3110,31 @@ static ssize_t htmm_sample_period_store(struct kobject *kobj,
 static struct kobj_attribute htmm_sample_period_attr =
 	__ATTR(htmm_sample_period, 0644, htmm_sample_period_show,
 	       htmm_sample_period_store);
+
+static ssize_t htmm_inst_sample_period_show(struct kobject *kobj,
+				   struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%u\n", htmm_inst_sample_period);
+}
+
+static ssize_t htmm_inst_sample_period_store(struct kobject *kobj,
+				    struct kobj_attribute *attr,
+				    const char *buf, size_t count)
+{
+	int err;
+	unsigned int period;
+
+	err = kstrtouint(buf, 10, &period);
+	if (err)
+		return err;
+
+	WRITE_ONCE(htmm_inst_sample_period, period);
+	return count;
+}
+
+static struct kobj_attribute htmm_inst_sample_period_attr =
+	__ATTR(htmm_inst_sample_period, 0644, htmm_inst_sample_period_show,
+	       htmm_inst_sample_period_store);
 
 static ssize_t htmm_thres_huge_hot_show(struct kobject *kobj,
 				   struct kobj_attribute *attr, char *buf)
@@ -3308,6 +3337,56 @@ static struct kobj_attribute htmm_base_spatial_count_attr =
 	__ATTR(htmm_base_spatial_count, 0644, htmm_base_spatial_count_show,
 	       htmm_base_spatial_count_store);
 
+static ssize_t htmm_thres_split_show(struct kobject *kobj,
+				   struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%u\n", htmm_thres_split);
+}
+
+static ssize_t htmm_thres_split_store(struct kobject *kobj,
+				    struct kobj_attribute *attr,
+				    const char *buf, size_t count)
+{
+	int err;
+	unsigned int thres;
+
+	err = kstrtouint(buf, 10, &thres);
+	if (err)
+		return err;
+
+	WRITE_ONCE(htmm_thres_split, thres);
+	return count;
+}
+
+static struct kobj_attribute htmm_thres_split_attr =
+	__ATTR(htmm_thres_split, 0644, htmm_thres_split_show,
+	       htmm_thres_split_store);
+
+static ssize_t htmm_static_thres_show(struct kobject *kobj,
+				   struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%u\n", htmm_static_thres);
+}
+
+static ssize_t htmm_static_thres_store(struct kobject *kobj,
+				    struct kobj_attribute *attr,
+				    const char *buf, size_t count)
+{
+	int err;
+	unsigned int thres;
+
+	err = kstrtouint(buf, 10, &thres);
+	if (err)
+		return err;
+
+	WRITE_ONCE(htmm_static_thres, thres);
+	return count;
+}
+
+static struct kobj_attribute htmm_static_thres_attr =
+	__ATTR(htmm_static_thres, 0644, htmm_static_thres_show,
+	       htmm_static_thres_store);
+
 static ssize_t htmm_thres_adjust_show(struct kobject *kobj,
 				   struct kobj_attribute *attr, char *buf)
 {
@@ -3333,6 +3412,30 @@ static struct kobj_attribute htmm_thres_adjust_attr =
 	__ATTR(htmm_thres_adjust, 0644, htmm_thres_adjust_show,
 	       htmm_thres_adjust_store);
 
+static ssize_t htmm_util_weight_show(struct kobject *kobj,
+				   struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%u\n", htmm_util_weight);
+}
+
+static ssize_t htmm_util_weight_store(struct kobject *kobj,
+				    struct kobj_attribute *attr,
+				    const char *buf, size_t count)
+{
+	int err;
+	unsigned int util_w;
+
+	err = kstrtouint(buf, 10, &util_w);
+	if (err)
+		return err;
+
+	WRITE_ONCE(htmm_util_weight, util_w);
+	return count;
+}
+
+static struct kobj_attribute htmm_util_weight_attr =
+	__ATTR(htmm_util_weight, 0644, htmm_util_weight_show,
+	       htmm_util_weight_store);
 
 static ssize_t htmm_mode_show(struct kobject *kobj,
 			      struct kobj_attribute *attr, char *buf)
@@ -3377,6 +3480,7 @@ static struct kobj_attribute htmm_mode_attr =
 
 static struct attribute *htmm_attrs[] = {
 	&htmm_sample_period_attr.attr,
+	&htmm_inst_sample_period_attr.attr,
 	&htmm_thres_huge_hot_attr.attr,
 	&htmm_thres_hot_attr.attr,
 	&htmm_thres_cold_attr.attr,
@@ -3385,7 +3489,10 @@ static struct attribute *htmm_attrs[] = {
 	&htmm_demotion_period_attr.attr,
 	&htmm_promotion_period_attr.attr,
 	&htmm_base_spatial_count_attr.attr,
+	&htmm_thres_split_attr.attr,
+	&htmm_static_thres_attr.attr,
 	&htmm_thres_adjust_attr.attr,
+	&htmm_util_weight_attr.attr,
 	&htmm_mode_attr.attr,
 	NULL,
 };

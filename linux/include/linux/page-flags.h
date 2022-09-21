@@ -143,6 +143,7 @@ enum pageflags {
 #endif
 #ifdef CONFIG_HTMM
 	PG_htmm,
+	PG_needsplit,
 #endif
 	__NR_PAGEFLAGS,
 
@@ -468,6 +469,9 @@ PAGEFLAG_FALSE(SkipKASanPoison)
 
 #ifdef CONFIG_HTMM
 PAGEFLAG(Htmm, htmm, PF_ANY)
+
+PAGEFLAG(NeedSplit, needsplit, PF_HEAD)
+TESTCLEARFLAG(NeedSplit, needsplit, PF_HEAD)
 #endif
 
 /*

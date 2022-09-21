@@ -31,6 +31,7 @@ gfp_t __userpte_alloc_gfp = GFP_PGTABLE_USER | PGTABLE_HIGHMEM;
 #ifdef CONFIG_HTMM
 static void __pte_alloc_pginfo(struct page *page)
 {
+    /* __userpte_alloc_gfp contains __GFP_ZERO */
     page->pginfo = kmem_cache_alloc(pginfo_cache,
 				    __userpte_alloc_gfp);
     if (page->pginfo)

@@ -6,6 +6,7 @@
 #include <linux/mempolicy.h>
 #include <linux/sched.h>
 #include <linux/perf_event.h>
+#include <linux/delay.h>
 
 #include "../kernel/events/internal.h"
 
@@ -41,7 +42,7 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
 {
     struct perf_event_attr attr;
     struct file *file;
-    int event_fd;
+    int event_fd, __pid;
 
     memset(&attr, 0, sizeof(struct perf_event_attr));
 
@@ -49,14 +50,24 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
     attr.size = sizeof(struct perf_event_attr);
     attr.config = config;
     attr.config1 = config1;
-    attr.sample_period = htmm_sample_period;
+    if (config == ALL_STORES)
+	attr.sample_period = htmm_inst_sample_period;
+    else
+	attr.sample_period = htmm_sample_period;
     attr.sample_type = PERF_SAMPLE_IP | PERF_SAMPLE_TID | PERF_SAMPLE_ADDR;
     attr.disabled = 0;
     attr.exclude_kernel = 1;
+    attr.exclude_hv = 1;
+    attr.exclude_callchain_kernel = 1;
+    attr.exclude_callchain_user = 1;
     attr.precise_ip = 1;
 
-    
-    event_fd = htmm__perf_event_open(&attr, pid, cpu, -1, 0);
+    if (pid == 0)
+	__pid = -1;
+    else
+	__pid = pid;
+	
+    event_fd = htmm__perf_event_open(&attr, __pid, cpu, -1, 0);
     //event_fd = htmm__perf_event_open(&attr, -1, cpu, -1, 0);
     if (event_fd <= 0) {
 	printk("[error htmm__perf_event_open failure] event_fd: %d\n", event_fd);
@@ -114,13 +125,18 @@ static void pebs_disable(void)
 
 static int ksamplingd(void *data)
 {
-    unsigned long long nr_sampled = 0;
+    unsigned long long nr_sampled = 0, nr_dram = 0, nr_nvm = 0, nr_write = 0;
     unsigned long long nr_throttled = 0;
     unsigned long long nr_unknown = 0;
 
     while (!kthread_should_stop()) {
 	int cpu, event;
-	
+    
+	if (htmm_mode == HTMM_NO_MIG) {
+	    msleep_interruptible(10000);
+	    continue;
+	}
+
 	for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
 	    for (event = 0; event < N_HTMMEVENTS; event++) {
 		struct perf_buffer *rb;
@@ -159,20 +175,21 @@ static int ksamplingd(void *data)
 		    case PERF_RECORD_SAMPLE:
 			he = (struct htmm_event *)ph;
 			if (!valid_va(he->addr)) {
-			    //printk("invalid va: %llx\n", he->addr);
 			    break;
 			}
 
-			update_pginfo(he->pid, he->addr);
-			count_vm_event(HTMM_NR_SAMPLED);
-			nr_sampled++;
+			if (htmm_mode == 99999) //ex
+			    continue;
 
-			if (htmm_mode == HTMM_HUGEPAGE_OPT_V2) {
-			    if (nr_sampled % htmm_thres_adjust == 0)
-				adjust_active_threshold(he->pid);
-			    if (nr_sampled % htmm_thres_cold == 0)
-				set_lru_cooling_pid(he->pid);
-			}
+			update_pginfo(he->pid, he->addr, event);
+			//count_vm_event(HTMM_NR_SAMPLED);
+			nr_sampled++;
+			if (event == DRAMREAD)
+			    nr_dram++;
+			else if (event == NVMREAD)
+			    nr_nvm++;
+			else
+			    nr_write++;
 			break;
 		    case PERF_RECORD_THROTTLE:
 		    case PERF_RECORD_UNTHROTTLE:
@@ -184,8 +201,12 @@ static int ksamplingd(void *data)
 			nr_unknown++;
 			break;
 		}
-		if (nr_sampled % 100000 == 0)
-		    printk("nr_sampled: %llu,    nr_throttled: %llu \n", nr_sampled, nr_throttled);
+		if (nr_sampled % 100000 == 0) {
+		    //printk("nr_sampled: %llu, nr_dram: %llu, nr_nvm: %llu, nr_write: %llu, nr_throttled: %llu \n", nr_sampled, nr_dram, nr_nvm, nr_write, nr_throttled);
+		    nr_dram = 0;
+		    nr_nvm = 0;
+		    nr_write = 0;
+		}
 		/* read, write barrier */
 		smp_mb();
 		WRITE_ONCE(up->data_tail, up->data_tail + ph->size);
