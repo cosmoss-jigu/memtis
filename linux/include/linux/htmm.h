@@ -2,13 +2,14 @@
 
 #define DEFERRED_SPLIT_ISOLATED 1
 
-#define BUFFER_SIZE	512 /* 1MB */
+#define BUFFER_SIZE	128 /* 1MB */
 #define CPUS_PER_SOCKET 20
 #define MAX_MIGRATION_RATE_IN_MBPS  1024 /* 1024MB per sec */
 
 
 /* pebs events */
 #define DRAM_LLC_LOAD_MISS  0x1d3
+#define REMOTE_DRAM_LLC_LOAD_MISS   0x2d3
 #define NVM_LLC_LOAD_MISS   0x80d1
 #define ALL_STORES	    0x82d0
 #define ALL_LOADS	    0x81d0
@@ -16,15 +17,16 @@
 #define STLB_MISS_LOADS	    0x11d0
 
 /* tmm option */
-#define HTMM_NO_MIG	    0x0
-#define	HTMM_BASELINE	    0x1
-#define HTMM_HUGEPAGE_OPT   0x2
-#define HTMM_HUGEPAGE_OPT_V2	0x3
+#define HTMM_NO_MIG	    0x0	/* unused */
+#define	HTMM_BASELINE	    0x1 /* unused */
+#define HTMM_HUGEPAGE_OPT   0x2 /* only used */
+#define HTMM_HUGEPAGE_OPT_V2	0x3 /* unused */
 
 /**/
-#define DRAM_ACCESS_CYCLES  150
-#define NVM_ACCESS_CYCLES   500
-#define DELTA_CYCLES	(NVM_ACCESS_CYCLES - DRAM_ACCESS_CYCLES)
+#define DRAM_ACCESS_LATENCY 80
+#define NVM_ACCESS_LATENCY  270
+#define CXL_ACCESS_LATENCY  170
+#define DELTA_CYCLES	(NVM_ACCESS_LATENCY - DRAM_ACCESS_LATENCY)
 
 #define MULTIPLIER  4
 
@@ -41,6 +43,7 @@ enum events {
     MEMWRITE = 2,
     TLB_MISS_LOADS = 3,
     TLB_MISS_STORES = 4,
+    CXLREAD = 5, // emulated by remote DRAM node
     N_HTMMEVENTS
 };
 
@@ -90,16 +93,12 @@ extern struct page *get_meta_page(struct page *page);
 extern unsigned int get_accesses_from_idx(unsigned int idx);
 extern unsigned int get_idx(unsigned long num);
 extern int get_base_idx(unsigned int num);
-extern int get_skew_idx(unsigned int num);
+extern int get_skew_idx(unsigned long num);
 extern unsigned int get_weight(uint8_t history);
 extern void uncharge_htmm_pte(pte_t *pte, struct mem_cgroup *memcg);
 extern void uncharge_htmm_page(struct page *page, struct mem_cgroup *memcg);
 extern void charge_htmm_page(struct page *page, struct mem_cgroup *memcg);
 
-extern long cal_huge_hotness(struct mem_cgroup *memcg, void *meta, bool huge);
-extern bool is_hot_huge_page(struct page *meta);
-extern bool is_hot_huge_page_v2(struct page *meta);
-extern enum region_list hugepage_type(struct page *page);
 
 extern void set_lru_split_pid(pid_t pid);
 extern void adjust_active_threshold(pid_t pid);
@@ -125,6 +124,3 @@ extern void add_memcg_to_kmigraterd(struct mem_cgroup *memcg, int nid);
 extern void del_memcg_from_kmigraterd(struct mem_cgroup *memcg, int nid);
 extern int kmigraterd_init(void);
 
-/* htmm_cooler.c */
-extern void register_memcg_for_cooling(struct mem_cgroup *memcg);
-extern int kcoolingd_init(void);

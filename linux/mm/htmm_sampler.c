@@ -29,9 +29,17 @@ static __u64 get_pebs_event(enum events e)
 	case DRAMREAD:
 	    return DRAM_LLC_LOAD_MISS;
 	case NVMREAD:
-	    return NVM_LLC_LOAD_MISS;
+	    if (!htmm_cxl_mode)
+		return NVM_LLC_LOAD_MISS;
+	    else
+		return N_HTMMEVENTS;
 	case MEMWRITE:
 	    return ALL_STORES;
+	case CXLREAD:
+	    if (htmm_cxl_mode)
+		return REMOTE_DRAM_LLC_LOAD_MISS;
+	    else
+		return N_HTMMEVENTS;
 	default:
 	    return N_HTMMEVENTS;
     }
@@ -129,6 +137,12 @@ static int ksamplingd(void *data)
     unsigned long long nr_throttled = 0;
     unsigned long long nr_unknown = 0;
 
+    /* TODO implements per-CPU node ksamplingd by using pg_data_t */
+    /* Currently uses a single CPU node(0) */
+    const struct cpumask *cpumask = cpumask_of_node(0);
+    if (!cpumask_empty(cpumask))
+	do_set_cpus_allowed(access_sampling, cpumask);
+
     while (!kthread_should_stop()) {
 	int cpu, event;
     
@@ -186,7 +200,7 @@ static int ksamplingd(void *data)
 			nr_sampled++;
 			if (event == DRAMREAD)
 			    nr_dram++;
-			else if (event == NVMREAD)
+			else if (event == CXLREAD || event == NVMREAD)
 			    nr_nvm++;
 			else
 			    nr_write++;
@@ -201,8 +215,8 @@ static int ksamplingd(void *data)
 			nr_unknown++;
 			break;
 		}
-		if (nr_sampled % 100000 == 0) {
-		    //printk("nr_sampled: %llu, nr_dram: %llu, nr_nvm: %llu, nr_write: %llu, nr_throttled: %llu \n", nr_sampled, nr_dram, nr_nvm, nr_write, nr_throttled);
+		if (nr_sampled % 500000 == 0) {
+		    printk("nr_sampled: %llu, nr_dram: %llu, nr_nvm: %llu, nr_write: %llu, nr_throttled: %llu \n", nr_sampled, nr_dram, nr_nvm, nr_write, nr_throttled);
 		    nr_dram = 0;
 		    nr_nvm = 0;
 		    nr_write = 0;

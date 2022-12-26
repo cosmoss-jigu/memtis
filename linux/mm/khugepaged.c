@@ -839,7 +839,7 @@ static inline gfp_t alloc_hugepage_khugepaged_gfpmask(void)
 }
 
 #ifdef CONFIG_NUMA
-#ifdef CONFIG_HTMM
+#if 0 //def CONFIG_HTMM
 static int khugepaged_find_target_node(huge_region_t *region)
 #else
 static int khugepaged_find_target_node(void)
@@ -863,7 +863,7 @@ static int khugepaged_find_target_node(void)
 				target_node = nid;
 				break;
 			}
-#ifdef CONFIG_HTMM
+#if 0 //def CONFIG_HTMM
 	if (region) {
 	    if (region_for_toptier(region)) {
 		if (!node_is_toptier(target_node))
@@ -912,7 +912,7 @@ khugepaged_alloc_page(struct page **hpage, gfp_t gfp, int node)
 	return *hpage;
 }
 #else
-#ifdef CONFIG_HTMM
+#if 0 //def CONFIG_HTMM
 static int khugepaged_find_target_node(huge_region_t *region)
 #else
 static int khugepaged_find_target_node(void)
@@ -1128,7 +1128,7 @@ static int collapse_huge_page(struct mm_struct *mm,
 		goto normal_exec;
 	    else {
 		result = SCAN_ALLOC_HUGE_PAGE_FAIL;
-		ret = 1;
+		//ret = 1;
 		goto out_nolock;
 	    }
 	}
@@ -1268,7 +1268,7 @@ out_nolock:
 	if (!IS_ERR_OR_NULL(*hpage))
 		mem_cgroup_uncharge(*hpage);
 	trace_mm_collapse_huge_page(mm, isolated, result);
-#ifdef CONFIG_HTMM
+#if 0 //def CONFIG_HTMM
 	ret = 2;
 #endif
 	return ret;
@@ -1296,6 +1296,9 @@ static int khugepaged_scan_pmd(struct mm_struct *mm,
 	spinlock_t *ptl;
 	int node = NUMA_NO_NODE, unmapped = 0;
 	bool writable = false;
+#ifdef CONFIG_HTMM
+	pginfo_t *pginfo;
+#endif
 
 	VM_BUG_ON(address & ~HPAGE_PMD_MASK);
 
@@ -1351,7 +1354,16 @@ static int khugepaged_scan_pmd(struct mm_struct *mm,
 		}
 		if (pte_write(pteval))
 			writable = true;
-
+#ifdef CONFIG_HTMM
+		if (mm->htmm_enabled) {
+		    pginfo = get_pginfo_from_pte(_pte);
+		    if (!pginfo)
+			goto out_unmap;
+		    
+		    if (!pginfo->may_hot)
+			goto out_unmap;
+		}
+#endif
 		page = vm_normal_page(vma, _address, pteval);
 		if (unlikely(!page)) {
 			result = SCAN_PAGE_NULL;
@@ -1428,7 +1440,7 @@ static int khugepaged_scan_pmd(struct mm_struct *mm,
 out_unmap:
 	pte_unmap_unlock(pte, ptl);
 	if (ret) {
-#ifdef CONFIG_HTMM
+#if 0 //def CONFIG_HTMM
 		node = khugepaged_find_target_node(region);
 #else
 		node = khugepaged_find_target_node();
@@ -1741,7 +1753,7 @@ static int collapse_file(struct mm_struct *mm,
 		goto normal_exec_file;
 	    else {
 		result = SCAN_ALLOC_HUGE_PAGE_FAIL;
-		ret = 1;
+		//ret = 1;
 		goto out;
 	    }
 	}
@@ -2155,7 +2167,7 @@ static int khugepaged_scan_file(struct mm_struct *mm,
 		if (present < HPAGE_PMD_NR - khugepaged_max_ptes_none) {
 			result = SCAN_EXCEED_NONE_PTE;
 		} else {
-#ifdef CONFIG_HTMM
+#if 0//def CONFIG_HTMM
 			node = khugepaged_find_target_node(region);
 #else
 			node = khugepaged_find_target_node();
@@ -2586,7 +2598,7 @@ static int khugepaged(void *none)
 	set_user_nice(current, MAX_NICE);
 
 	while (!kthread_should_stop()) {
-#ifdef CONFIG_HTMM
+#if 0 //def CONFIG_HTMM
 		if (htmm_mode == HTMM_HUGEPAGE_OPT) {
 		    //khugepaged_region_scan();
 		    khugepaged_wait_work();

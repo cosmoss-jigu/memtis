@@ -200,7 +200,9 @@ extern unsigned int htmm_thres_split;
 extern unsigned int htmm_static_thres;
 extern unsigned int htmm_thres_adjust;
 extern unsigned int htmm_util_weight;
+extern unsigned int htmm_gamma;
 extern unsigned int htmm_mode;
+extern bool htmm_cxl_mode;
 #endif
 static inline bool mpol_is_preferred_many(struct mempolicy *pol)
 {

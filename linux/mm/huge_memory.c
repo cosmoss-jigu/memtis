@@ -2152,6 +2152,7 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 		    ClearPageActive(&page[i]);
 
 		spin_lock(&memcg->access_lock);
+		memcg->hotness_hg[get_idx(pte_pginfo->total_accesses)]++;
 		memcg->bp_hotness_hg[get_idx(pte_pginfo->total_accesses)]++;
 		spin_unlock(&memcg->access_lock);
 		/* Htmm flag will be cleared later */
@@ -2355,7 +2356,7 @@ static void unmap_page(struct page *page)
 	VM_WARN_ON_ONCE_PAGE(page_mapped(page), page);
 }
 
-static void remap_page(struct page *page, unsigned int nr)
+static void remap_page(struct page *page, unsigned int nr, bool unmap_clean)
 {
 	int i;
 
@@ -2363,10 +2364,10 @@ static void remap_page(struct page *page, unsigned int nr)
 	if (!PageAnon(page))
 		return;
 	if (PageTransHuge(page)) {
-		remove_migration_ptes(page, page, true);
+		remove_migration_ptes(page, page, true, unmap_clean);
 	} else {
 		for (i = 0; i < nr; i++)
-			remove_migration_ptes(page + i, page + i, true);
+			remove_migration_ptes(page + i, page + i, true, unmap_clean);
 	}
 }
 
@@ -2482,6 +2483,8 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 	struct address_space *swap_cache = NULL;
 	unsigned long offset = 0;
 	unsigned int nr = thp_nr_pages(head);
+	LIST_HEAD(pages_to_free);
+	int nr_pages_to_free = 0;
 	int i;
 
 	/* complete memcg works before add pages to LRU */
@@ -2542,7 +2545,7 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 	}
 	local_irq_enable();
 
-	remap_page(head, nr);
+	remap_page(head, nr, PageAnon(head));
 
 	if (PageSwapCache(head)) {
 		swp_entry_t entry = { .val = page_private(head) };
@@ -2555,6 +2558,34 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 		if (subpage == page)
 			continue;
 		unlock_page(subpage);
+		
+		/*
+		 * If a tail page has only two references left, one inherited
+		 * from the isolation of its head and the other from
+		 * lru_add_page_tail() which we are about to drop, it means this
+		 * tail page was concurrently zapped. Then we can safely free it
+		 * and save page reclaim or migration the trouble of trying it.
+		 */
+		if (list && page_ref_freeze(subpage, 2)) {
+		    VM_BUG_ON_PAGE(PageLRU(subpage), subpage);
+		    VM_BUG_ON_PAGE(PageCompound(subpage), subpage);
+		    VM_BUG_ON_PAGE(page_mapped(subpage), subpage);
+
+		    ClearPageActive(subpage);
+		    ClearPageUnevictable(subpage);
+		    list_move(&subpage->lru, &pages_to_free);
+		    nr_pages_to_free++;
+		    continue;
+		}
+
+		/*
+		 * If a tail page has only one reference left, it will be freed
+		 * by the call to free_page_and_swap_cache below. Since zero
+		 * subpages are no longer remapped, there will only be one
+		 * reference left in cases outside of reclaim or migration.
+		 */
+		if (page_ref_count(subpage) == 1)
+		    nr_pages_to_free++;
 
 		/*
 		 * Subpages may be freed if there wasn't any mapping
@@ -2565,6 +2596,12 @@ static void __split_huge_page(struct page *page, struct list_head *list,
 		 */
 		put_page(subpage);
 	}
+
+	if (!nr_pages_to_free)
+	    return;
+
+	mem_cgroup_uncharge_list(&pages_to_free);
+	free_unref_page_list(&pages_to_free);
 }
 
 int total_mapcount(struct page *page)
@@ -2793,10 +2830,16 @@ int split_huge_page_to_list(struct page *page, struct list_head *list)
 		    spin_lock(&memcg->access_lock);
 		    idx = head[3].idx;
 
+		    if (memcg->hotness_hg[idx] < HPAGE_PMD_NR)
+			memcg->hotness_hg[idx] = 0;
+		    else
+			memcg->hotness_hg[idx] -= HPAGE_PMD_NR;
+
 		    if (memcg->hp_hotness_hg[idx] < HPAGE_PMD_NR)
 			memcg->hp_hotness_hg[idx] = 0;
 		    else
 			memcg->hp_hotness_hg[idx] -= HPAGE_PMD_NR;
+
 		    spin_unlock(&memcg->access_lock);
 		}
 #endif
@@ -2808,7 +2851,7 @@ fail:
 		if (mapping)
 			xa_unlock(&mapping->i_pages);
 		local_irq_enable();
-		remap_page(head, thp_nr_pages(head));
+		remap_page(head, thp_nr_pages(head), false);
 #if 0 //def CONFIG_HTMM
 		{
 		    struct mem_cgroup *memcg = page_memcg(head);

@@ -78,7 +78,7 @@ unsigned long get_nr_lru_pages_node(struct mem_cgroup *memcg, pg_data_t *pgdat)
 
     for_each_lru(lru)
 	nr_pages += lruvec_lru_size(lruvec, lru, MAX_NR_ZONES);
-    
+   
     return nr_pages;
 }
 
@@ -86,8 +86,6 @@ static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgrou
 {
     struct lruvec *lruvec;
     unsigned long lruvec_size;
-
-    VM_BUG_ON(node_is_toptier(pgdat->node_id));
 
     lruvec = mem_cgroup_lruvec(memcg, pgdat);
     lruvec_size = lruvec_lru_size(lruvec, LRU_ACTIVE_ANON, MAX_NR_ZONES);
@@ -101,12 +99,10 @@ static unsigned long need_lowertier_promotion(pg_data_t *pgdat, struct mem_cgrou
 static bool need_toptier_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg, unsigned long *nr_exceeded)
 {
     unsigned long nr_lru_pages, max_nr_pages;
-    unsigned long nr_need_demoted, nr_need_promoted;
-    int target_nid = next_demotion_node(pgdat->node_id);
+    unsigned long nr_need_promoted;
+    int target_nid = htmm_cxl_mode ? 1 : next_demotion_node(pgdat->node_id);
     pg_data_t *target_pgdat;
-   
-    VM_BUG_ON(!node_is_toptier(pgdat->node_id));
-
+  
     if (target_nid == NUMA_NO_NODE)
 	return false;
 
@@ -114,20 +110,21 @@ static bool need_toptier_demotion(pg_data_t *pgdat, struct mem_cgroup *memcg, un
 
     max_nr_pages = memcg->nodeinfo[pgdat->node_id]->max_nr_base_pages;
     nr_lru_pages = get_nr_lru_pages_node(memcg, pgdat);
+
+    if (READ_ONCE(memcg->nodeinfo[pgdat->node_id]->need_demotion))
+	return true;
+
+    if (nr_lru_pages + HTMM_MIN_FREE_PAGES <= max_nr_pages)
+	return false;
+
     nr_need_promoted = need_lowertier_promotion(target_pgdat, memcg);
-    nr_need_demoted = max(nr_need_promoted, HTMM_MIN_FREE_PAGES);
+    if (nr_lru_pages + nr_need_promoted <= max_nr_pages)
+	return false;
 
-    if (nr_lru_pages + nr_need_demoted > max_nr_pages) {
-	if (nr_lru_pages > max_nr_pages) {
-	    *nr_exceeded = (nr_lru_pages - max_nr_pages + HTMM_MIN_FREE_PAGES);
-	    return true;
-	}
+    if (nr_lru_pages > max_nr_pages) 
+	*nr_exceeded = (nr_lru_pages - max_nr_pages);
 
-	if (nr_need_promoted != 0)
-	    return true;
-    }
-
-    return false;
+    return true;
 }
 
 static unsigned long node_free_pages(pg_data_t *pgdat)
@@ -167,15 +164,17 @@ static bool promotion_available(int target_nid, struct mem_cgroup *memcg,
     pgdat = NODE_DATA(target_nid);
 
     cur_nr_pages = get_nr_lru_pages_node(memcg, pgdat);
-    nr_isolated = node_page_state(pgdat, NR_ISOLATED_ANON);
-
     max_nr_pages = memcg->nodeinfo[target_nid]->max_nr_base_pages;
-    
+    nr_isolated = node_page_state(pgdat, NR_ISOLATED_ANON) +
+		  node_page_state(pgdat, NR_ISOLATED_FILE);
+
     if (max_nr_pages == ULONG_MAX) {
 	*nr_to_promote = node_free_pages(pgdat);
 	return true;
     }
     else if (cur_nr_pages + nr_isolated < max_nr_pages) {
+	/* almost isolated pages would be demoted to the capacity-tier,
+	 * so we add some value (HTMM_MIN_FREE_PAGES) in the above 'if' statement. */
 	*nr_to_promote = max_nr_pages - cur_nr_pages - nr_isolated;
 	return true;
     }
@@ -297,9 +296,9 @@ static unsigned long migrate_page_list(struct list_head *migrate_list,
     unsigned int nr_succeeded = 0;
 
     if (promotion)
-	target_nid = next_promotion_node(pgdat->node_id);
+	target_nid = htmm_cxl_mode ? 0 : next_promotion_node(pgdat->node_id);
     else
-	target_nid = next_demotion_node(pgdat->node_id);
+	target_nid = htmm_cxl_mode ? 1 : next_demotion_node(pgdat->node_id);
 
     if (list_empty(migrate_list))
 	return 0;
@@ -396,10 +395,6 @@ static unsigned long promote_page_list(struct list_head *page_list,
 	page = lru_to_page(page_list);
 	list_del(&page->lru);
 	
-	/*test*/
-	if (node_is_toptier(page_to_nid(page)))
-	    printk("page should be in the lowertier but detected as toptier\n");
-
 	if (!trylock_page(page))
 	    goto __keep;
 	if (!PageActive(page) && htmm_mode != HTMM_NO_MIG)
@@ -445,7 +440,6 @@ static unsigned long demote_inactive_list(unsigned long nr_to_scan,
     spin_unlock_irq(&lruvec->lru_lock);
 
     if (nr_taken == 0) {
-	printk("kmigraterd for demotion fails to isolate pages\n");
 	return 0;
     }
 
@@ -503,18 +497,34 @@ static unsigned long demote_lruvec(unsigned long nr_to_reclaim, short priority,
 	if (!shrink_active && is_active_lru(lru))
 	    continue;	
 	
-	if (is_file_lru(lru))
+	if (is_file_lru(lru)) {
 	    nr_to_scan = lruvec_lru_size(lruvec, lru, MAX_NR_ZONES);
-	else if (htmm_mode != HTMM_NO_MIG) {
+	    nr_to_reclaim <<= 1;
+	    if (nr_to_scan > nr_to_reclaim)
+		nr_to_scan = nr_to_reclaim;
+	} else if (htmm_mode != HTMM_NO_MIG) {
 	    nr_to_scan = lruvec_lru_size(lruvec, lru, MAX_NR_ZONES) >> priority;
-	    if (nr_to_scan >= 262144) // max nr_isolated is 1GB 
-		nr_to_scan = 262144;
+
+	    if (nr_to_scan < nr_to_reclaim)
+		nr_to_scan = nr_to_reclaim * 11 / 10; // because warm pages are not demoted
+	    //else if (nr_to_scan > nr_to_reclaim << 1)
+	    //	nr_to_reclaim <<= 1;
+	   // else if (nr_to_scan >= 262144) // max nr_isolated is 1GB 
+	///	nr_to_scan = 262144;
 	}
 
 	if (!nr_to_scan)
 	    continue;
-	nr_reclaimed += demote_inactive_list(nr_to_scan, nr_to_reclaim - nr_reclaimed,
+
+	while (nr_to_scan > 0) {
+	    unsigned long scan = min(nr_to_scan, SWAP_CLUSTER_MAX);
+	    nr_reclaimed += demote_inactive_list(scan, scan,
 					     lruvec, lru, shrink_active);
+	    nr_to_scan -= scan;
+	    if (nr_reclaimed >= nr_to_reclaim)
+		break;
+	}
+
 	if (nr_reclaimed >= nr_to_reclaim)
 	    break;
     }
@@ -528,9 +538,8 @@ static unsigned long promote_lruvec(unsigned long nr_to_promote, short priority,
     unsigned long nr_promoted = 0, nr;
     
     nr = nr_to_promote >> priority;
-    if (nr) {
+    if (nr)
 	nr_promoted += promote_active_list(nr, lruvec, lru);
-    }
 
     return nr_promoted;
 }
@@ -543,19 +552,14 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
     unsigned long nr_to_reclaim = 0, nr_evictable_pages = 0, nr_reclaimed = 0;
     enum lru_list lru;
     bool shrink_active = false;
+    int target_nid = htmm_cxl_mode ? 1 : next_demotion_node(pgdat->node_id);
 
-    if (nr_exceeded) {
-	/* exceeded pages should be demoted */
-	nr_to_reclaim = nr_exceeded;
-	shrink_active = true;
-    } else {
-	nr_to_reclaim = MAX_MIGRATION_RATE_IN_MBPS * 256;
-	nr_to_reclaim *= htmm_demotion_period_in_ms;
-	nr_to_reclaim /= 1000; // max num. of demotable pages in this period.
-    }
+    nr_to_reclaim = htmm_max_cooling_interval * 256; // mb to pages
+    nr_to_reclaim *= htmm_demotion_period_in_ms;
+    nr_to_reclaim /= 1000; // max num. of demotable pages in this period.
 
     for_each_evictable_lru(lru) {
-	if (!shrink_active && is_active_lru(lru))
+	if (is_active_lru(lru))
 	    continue;
 
 	if (htmm_mode == HTMM_NO_MIG && !is_file_lru(lru))
@@ -563,8 +567,15 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
 
 	nr_evictable_pages += lruvec_lru_size(lruvec, lru, MAX_NR_ZONES);
     }
+
     nr_to_reclaim = min(nr_to_reclaim, nr_evictable_pages);
-    
+    nr_to_reclaim = min(nr_to_reclaim, need_lowertier_promotion(NODE_DATA(target_nid), memcg));
+    if (nr_to_reclaim < HTMM_MIN_FREE_PAGES << 1)
+        nr_to_reclaim = HTMM_MIN_FREE_PAGES << 1;
+    nr_to_reclaim = max(nr_to_reclaim, nr_exceeded);
+    if (nr_exceeded > nr_evictable_pages)
+	shrink_active = true;
+
     do {
 	nr_reclaimed += demote_lruvec(nr_to_reclaim, priority, pgdat, lruvec, shrink_active);
 	if (nr_reclaimed >= nr_to_reclaim)
@@ -573,15 +584,17 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
     } while (priority);
 
     if (htmm_static_thres == 0) {
-	int target_nid = next_demotion_node(pgdat->node_id);
+	int target_nid = htmm_cxl_mode ? 1 : next_demotion_node(pgdat->node_id);
 	unsigned long nr_lowertier_active =
 	    target_nid == NUMA_NO_NODE ? 0: need_lowertier_promotion(NODE_DATA(target_nid), memcg);
 	
-	nr_lowertier_active = nr_lowertier_active < nr_to_reclaim ? : nr_to_reclaim;
+	nr_lowertier_active = nr_lowertier_active < nr_to_reclaim ?
+			nr_lowertier_active : nr_to_reclaim;
 	if (nr_lowertier_active && nr_reclaimed < nr_lowertier_active)
 	    memcg->warm_threshold = memcg->active_threshold;
     }
 
+    WRITE_ONCE(memcg->nodeinfo[pgdat->node_id]->need_demotion, false);
     return nr_reclaimed;
 }
 
@@ -591,11 +604,11 @@ static unsigned long promote_node(pg_data_t *pgdat, struct mem_cgroup *memcg)
     unsigned long nr_to_promote, nr_promoted = 0, tmp;
     enum lru_list lru = LRU_ACTIVE_ANON;
     short priority = DEF_PRIORITY;
+    int target_nid = htmm_cxl_mode ? 0 : next_promotion_node(pgdat->node_id);
 
-    if (!promotion_available(next_promotion_node(pgdat->node_id), memcg, &nr_to_promote))
+    if (!promotion_available(target_nid, memcg, &nr_to_promote))
 	return 0;
 
-    tmp = nr_to_promote;
     nr_to_promote = min(nr_to_promote,
 		    lruvec_lru_size(lruvec, lru, MAX_NR_ZONES));
     
@@ -648,8 +661,22 @@ static unsigned long cooling_active_list(unsigned long nr_to_scan,
 
 	    if (PageTransHuge(compound_head(page))) {
 		struct page *meta = get_meta_page(page);
-		
+		bool need_split = false;
+
+#ifdef DEFERRED_SPLIT_ISOLATED
+		if (check_split_huge_page(memcg, get_meta_page(page), false)) {
+
+		    spin_lock_irq(&lruvec->lru_lock);
+		    if (deferred_split_huge_page_for_htmm(compound_head(page))) {
+			need_split = true;
+		    }
+		    spin_unlock_irq(&lruvec->lru_lock);
+		}
+#endif
 		check_transhuge_cooling((void *)memcg, page, false);
+		if (need_split)
+		    continue;
+
 		if (meta->idx >= memcg->active_threshold)
 		    still_hot = 2;
 		else
@@ -880,8 +907,11 @@ static struct mem_cgroup_per_node *next_memcg_cand(pg_data_t *pgdat)
 
 static int kmigraterd_demotion(pg_data_t *pgdat)
 {
-    do_set_cpus_allowed(pgdat->kmigraterd, cpumask_of_node(pgdat->node_id));
+    const struct cpumask *cpumask = cpumask_of_node(pgdat->node_id);
     bool split = false;
+
+    if (!cpumask_empty(cpumask))
+	do_set_cpus_allowed(pgdat->kmigraterd, cpumask);
 
     for ( ; ; ) {
 	struct mem_cgroup_per_node *pn;
@@ -913,7 +943,7 @@ static int kmigraterd_demotion(pg_data_t *pgdat)
 	}
 
 	/* performs split */
-	if (htmm_mode == HTMM_HUGEPAGE_OPT && htmm_thres_split != 0 &&
+	if (htmm_thres_split != 0 &&
 		!list_empty(&(&pn->deferred_split_queue)->split_queue)) {
 	    unsigned long nr_split;
 	    nr_split = deferred_split_scan_for_htmm(pn, &split_list);
@@ -922,16 +952,13 @@ static int kmigraterd_demotion(pg_data_t *pgdat)
 	    }
 	    if (nr_split != 0)
 		split = true;
-	    printk("nr_split by kdemotiond: %lu\n", nr_split);
+	    //printk("nr_split by kdemotiond: %lu\n", nr_split);
 	}
 
 	/* performs cooling */
-	if (need_lru_cooling(pn)) {
-	    if (htmm_mode == HTMM_HUGEPAGE_OPT_V2)
-		cooling_node(pgdat, memcg, true); // false->true
-	    else if (htmm_mode == HTMM_HUGEPAGE_OPT)
-		cooling_node(pgdat, memcg, true);
-	} else if (need_lru_adjusting(pn)) {
+	if (need_lru_cooling(pn))
+	    cooling_node(pgdat, memcg, true);
+	else if (need_lru_adjusting(pn)) {
 	    adjusting_node(pgdat, memcg, true);
 	    if (pn->need_adjusting_all == true)
 		adjusting_node(pgdat, memcg, false);
@@ -950,9 +977,14 @@ static int kmigraterd_demotion(pg_data_t *pgdat)
 
 static int kmigraterd_promotion(pg_data_t *pgdat)
 {
-    int target_nid;
-    const struct cpumask *cpumask = cpumask_of_node(pgdat->node_id - 2);
+    const struct cpumask *cpumask;
     bool split = false;
+
+    if (htmm_cxl_mode)
+    	cpumask = cpumask_of_node(pgdat->node_id);
+    else
+	cpumask = cpumask_of_node(pgdat->node_id - 2);
+
     if (!cpumask_empty(cpumask))
 	do_set_cpus_allowed(pgdat->kmigraterd, cpumask);
 
@@ -985,7 +1017,7 @@ static int kmigraterd_promotion(pg_data_t *pgdat)
 	}
 
 	/* performs split */
-	if (htmm_mode == HTMM_HUGEPAGE_OPT && htmm_thres_split != 0 &&
+	if (htmm_thres_split != 0 &&
 		!list_empty(&(&pn->deferred_split_queue)->split_queue)) {
 	    unsigned long nr_split;
 	    nr_split = deferred_split_scan_for_htmm(pn, &split_list);
@@ -994,16 +1026,12 @@ static int kmigraterd_promotion(pg_data_t *pgdat)
 	    }
 	    if (nr_split != 0)
 		split = true;
-	    printk("nr_splitted by kpromoted: %lu\n", nr_split);
+	    //printk("nr_splitted by kpromoted: %lu\n", nr_split);
 	}
 
-	if (need_lru_cooling(pn)) {
-	    if (htmm_mode == HTMM_HUGEPAGE_OPT_V2)
-		cooling_node(pgdat, memcg, true); // false -> true
-	    else if (htmm_mode == HTMM_HUGEPAGE_OPT)
-		cooling_node(pgdat, memcg, true);
-
-	} else if (need_lru_adjusting(pn)) {
+	if (need_lru_cooling(pn))
+	    cooling_node(pgdat, memcg, true);
+	else if (need_lru_adjusting(pn)) {
 	    adjusting_node(pgdat, memcg, true);
 	    if (pn->need_adjusting_all == true)
 		adjusting_node(pgdat, memcg, false);
@@ -1024,6 +1052,13 @@ static int kmigraterd(void *p)
 {
     pg_data_t *pgdat = (pg_data_t *)p;
     int nid = pgdat->node_id;
+
+    if (htmm_cxl_mode) {
+	if (nid == 0)
+	    return kmigraterd_demotion(pgdat);
+	else
+	    return kmigraterd_promotion(pgdat);
+    }
 
     if (node_is_toptier(nid))
 	return kmigraterd_demotion(pgdat);

@@ -247,7 +247,8 @@ int page_mkclean(struct page *);
  */
 void page_mlock(struct page *page);
 
-void remove_migration_ptes(struct page *old, struct page *new, bool locked);
+void remove_migration_ptes(struct page *old, struct page *new, bool locked,
+			    bool unmap_clean);
 
 /*
  * Called by memory-failure.c to kill processes.

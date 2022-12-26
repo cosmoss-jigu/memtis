@@ -5133,6 +5133,7 @@ static int alloc_mem_cgroup_per_node_info(struct mem_cgroup *memcg, int node)
 	pn->need_cooling = false;
 	pn->need_adjusting = false;
 	pn->need_adjusting_all = false;
+	pn->need_demotion = false;
 	spin_lock_init(&pn->deferred_split_queue.split_queue_lock);
 	INIT_LIST_HEAD(&pn->deferred_split_queue.split_queue);
 	INIT_LIST_HEAD(&pn->deferred_list);
@@ -5236,11 +5237,12 @@ static struct mem_cgroup *mem_cgroup_alloc(void)
 	memcg->htmm_enabled = false;
 	memcg->max_nr_dram_pages = ULONG_MAX;
 	memcg->nr_active_pages = 0;
-	memcg->htmm_next_cooling = jiffies + msecs_to_jiffies(1000);
 	memcg->nr_sampled = 0;
 	memcg->nr_dram_sampled = 0;
 	memcg->prev_dram_sampled = 0;
+	memcg->max_dram_sampled = 0;
 	memcg->prev_max_dram_sampled = 0;
+	/* thresholds */
 	memcg->active_threshold = 1;
 	memcg->warm_threshold = 0;
 	memcg->bp_active_threshold = 1;
@@ -5261,22 +5263,12 @@ static struct mem_cgroup *mem_cgroup_alloc(void)
 	    memcg->hp_hotness_hg[i] = 0;
 	    memcg->ebp_hotness_hg[i] = 0;
 	}
-	for (i = 0; i < 2; i++)
-	    memcg->base_map[i] = 0;
-
-	for (i = 0; i < 513; i++)
-	    memcg->pages_per_util[i] = 0;
 
 	spin_lock_init(&memcg->access_lock);
-	memcg->cooling_status = false;
+	memcg->cooled = false;
+	memcg->split_happen = false;
 	memcg->need_split = false;
-	memcg->history_clock = 0;
 	memcg->cooling_clock = 0;
-
-	memcg->count = 0;
-	spin_lock_init(&memcg->htmm_mm_list_lock);
-	INIT_LIST_HEAD(&memcg->htmm_mm_list);
-	INIT_LIST_HEAD(&memcg->cooling_entry);
 #endif
 	idr_replace(&mem_cgroup_idr, memcg, memcg->id.id);
 	return memcg;
@@ -7654,61 +7646,18 @@ static int memcg_access_map_show(struct seq_file *m, void *v)
     }
 
     for (i = 15; i >= 0; i--) {
+	/*
 	seq_buf_printf(&s, "access_map[%2d]: %10lu  hp_hotness_hg[%2d]: %10lu	bp_hotness_hg[%2d]: %10lu   ebp_hotness_hg[%2d]: %10lu\n",
 		i, memcg->access_map[i], i, memcg->hp_hotness_hg[i], i, memcg->bp_hotness_hg[i], i, memcg->ebp_hotness_hg[i]);
+	*/
+	seq_buf_printf(&s, "access_map[%2d]: %10lu  hotness_hg[%2d]: %10lu  hp_hotness_hg[%2d]: %10lu	bp_hotness_hg[%2d]: %10lu   ebp_hotness_hg[%2d]: %10lu\n",
+		i, memcg->access_map[i], i, memcg->hotness_hg[i], i, memcg->hp_hotness_hg[i], i, memcg->bp_hotness_hg[i], i, memcg->ebp_hotness_hg[i]);
+
+
     }
 
     seq_puts(m, s.buffer);
     kfree(s.buffer);
-#if 0
-    seq_printf(m, "	    access_map [10]: %lu\n\
-	    access_map [9]: %lu\n\
-	    access_map [8]: %lu\n\
-	    access_map [7]: %lu\n\
-	    access_map [6]: %lu\n\
-	    access_map [5]: %lu\n\
-	    access_map [4]: %lu\n\
-	    access_map [3]: %lu\n\
-	    access_map [2]: %lu\n\
-	    access_map [1]: %lu\n\
-	    access_map [0]: %lu\n",
-	    memcg->access_map[10], memcg->access_map[9],
-	    memcg->access_map[8], memcg->access_map[7],
-	    memcg->access_map[6], memcg->access_map[5],
-	    memcg->access_map[4], memcg->access_map[3],
-	    memcg->access_map[2], memcg->access_map[1],
-	    memcg->access_map[0]);
-    if (htmm_mode == HTMM_HUGEPAGE_OPT) {
-	/*seq_printf(m, "%lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu\n",
-	    memcg->hotness_map[11], memcg->hotness_map[10], memcg->hotness_map[9],
-	    memcg->hotness_map[8], memcg->hotness_map[7],
-	    memcg->hotness_map[6], memcg->hotness_map[5],
-	    memcg->hotness_map[4], memcg->hotness_map[3],
-	    memcg->hotness_map[2], memcg->hotness_map[1],
-	    memcg->hotness_map[0]);*/
-	seq_printf(m, "hotness map:\n%lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu\nbase_map:\n%lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu\n",
-	    memcg->hotness_map[11], memcg->hotness_map[10], memcg->hotness_map[9],
-	    memcg->hotness_map[8], memcg->hotness_map[7],
-	    memcg->hotness_map[6], memcg->hotness_map[5],
-	    memcg->hotness_map[4], memcg->hotness_map[3],
-	    memcg->hotness_map[2], memcg->hotness_map[1],
-	    memcg->hotness_map[0],
-	    memcg->base_map[11], memcg->base_map[10], memcg->base_map[9],
-	    memcg->base_map[8], memcg->base_map[7],
-	    memcg->base_map[6], memcg->base_map[5],
-	    memcg->base_map[4], memcg->base_map[3],
-	    memcg->base_map[2], memcg->base_map[1],
-	    memcg->base_map[0]);
-
-    } else
-	seq_printf(m, "%lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu %lu\n",
-	    memcg->access_map[11], memcg->access_map[10], memcg->access_map[9],
-	    memcg->access_map[8], memcg->access_map[7],
-	    memcg->access_map[6], memcg->access_map[5],
-	    memcg->access_map[4], memcg->access_map[3],
-	    memcg->access_map[2], memcg->access_map[1],
-	    memcg->access_map[0]);
-#endif
 
     return 0;
 }
@@ -7743,11 +7692,14 @@ static int memcg_hotness_stat_show(struct seq_file *m, void *v)
 
     for (i = 15; i >= 0; i--) {
 	if (i >= memcg->active_threshold)
-	    hot += (memcg->hp_hotness_hg[i] + memcg->bp_hotness_hg[i]);
+	    //hot += (memcg->hp_hotness_hg[i] + memcg->bp_hotness_hg[i]);
+	    hot += memcg->hotness_hg[i];
 	else if (i >= memcg->warm_threshold)
-	    warm += (memcg->hp_hotness_hg[i] + memcg->bp_hotness_hg[i]);
+	    //warm += (memcg->hp_hotness_hg[i] + memcg->bp_hotness_hg[i]);
+	    warm += memcg->hotness_hg[i];
 	else
-	    cold += (memcg->hp_hotness_hg[i] + memcg->bp_hotness_hg[i]);    
+	    //cold += (memcg->hp_hotness_hg[i] + memcg->bp_hotness_hg[i]);    
+	    cold += memcg->hotness_hg[i];
     }
 
     seq_buf_printf(&s, "hot %lu warm %lu cold %lu\n", hot, warm, cold);

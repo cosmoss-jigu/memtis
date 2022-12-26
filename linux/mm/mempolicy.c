@@ -2110,6 +2110,7 @@ struct page *alloc_pages_vma(gfp_t gfp, int order, struct vm_area_struct *vma,
 	    struct mem_cgroup *memcg = mem_cgroup_from_task(p);
 	    unsigned long max_nr_pages;
 	    int nid = pol->mode == MPOL_PREFERRED ? first_node(pol->nodes) : node;
+	    int orig_nid;
 	    unsigned int nr_pages = 1U << order;
 	    pg_data_t *pgdat = NODE_DATA(nid);
 	    
@@ -2121,6 +2122,10 @@ struct page *alloc_pages_vma(gfp_t gfp, int order, struct vm_area_struct *vma,
 		goto use_default_pol;
 
 	    while (max_nr_pages <= (get_nr_lru_pages_node(memcg, pgdat) + nr_pages)) {
+		if (htmm_cxl_mode) {
+		    nid = 1;
+		    break;
+		}
 		if ((nid = next_demotion_node(nid)) == NUMA_NO_NODE) {
 		    nid = first_memory_node;
 		    break;
@@ -2128,6 +2133,11 @@ struct page *alloc_pages_vma(gfp_t gfp, int order, struct vm_area_struct *vma,
 		max_nr_pages = READ_ONCE(memcg->nodeinfo[nid]->max_nr_base_pages);
 		pgdat = NODE_DATA(nid);
 	    }
+
+	    if (orig_nid != nid)
+		WRITE_ONCE(memcg->nodeinfo[orig_nid]->need_demotion, true);
+	    else if (max_nr_pages <= (get_nr_lru_pages_node(memcg, pgdat) + 5 * HTMM_MIN_FREE_PAGES))
+		WRITE_ONCE(memcg->nodeinfo[nid]->need_demotion, true);
 	    
 	    mpol_cond_put(pol);
 	    page = __alloc_pages_node(nid, gfp | __GFP_THISNODE, order);
@@ -3015,17 +3025,19 @@ unsigned int htmm_sample_period = 401;
 unsigned int htmm_inst_sample_period = 10007;
 unsigned int htmm_thres_hot = 2;
 unsigned int htmm_thres_cold = 2000000;
-unsigned int htmm_thres_huge_hot = 22 * (DELTA_CYCLES - DRAM_ACCESS_CYCLES);
+unsigned int htmm_thres_huge_hot = 2;
 unsigned int htmm_min_cooling_interval = 5000; /* in ms, 5s */
-unsigned int htmm_max_cooling_interval = 60000; /* in ms, 60s */
+unsigned int htmm_max_cooling_interval = 1000; /* in ms, 60s */
 unsigned int htmm_demotion_period_in_ms = 100;
 unsigned int htmm_promotion_period_in_ms = 100;
 unsigned int htmm_base_spatial_count = 0;
-unsigned int htmm_thres_split = 6; 
+unsigned int htmm_thres_split = 2; 
 unsigned int htmm_static_thres = 0;
 unsigned int htmm_thres_adjust = 100000;
 unsigned int htmm_util_weight = 10;
 unsigned int htmm_mode = 1;
+unsigned int htmm_gamma = 4; /* divide this by 10 */
+bool htmm_cxl_mode = true;
 #endif
 
 #ifdef CONFIG_SYSFS
@@ -3437,6 +3449,59 @@ static struct kobj_attribute htmm_util_weight_attr =
 	__ATTR(htmm_util_weight, 0644, htmm_util_weight_show,
 	       htmm_util_weight_store);
 
+static ssize_t htmm_gamma_show(struct kobject *kobj,
+			       struct kobj_attribute *attr, char *buf)
+{
+	return sysfs_emit(buf, "%u\n", htmm_gamma);
+}
+
+static ssize_t htmm_gamma_store(struct kobject *kobj,
+				struct kobj_attribute *attr,
+				const char *buf, size_t count)
+{
+	int err;
+	unsigned int g;
+
+	err = kstrtouint(buf, 10, &g);
+	if (err)
+		return err;
+
+	WRITE_ONCE(htmm_gamma, g);
+	return count;
+}
+
+static struct kobj_attribute htmm_gamma_attr =
+	__ATTR(htmm_gamma, 0644, htmm_gamma_show,
+	       htmm_gamma_store);
+
+
+static ssize_t htmm_cxl_mode_show(struct kobject *kobj,
+				  struct kobj_attribute *attr, char *buf)
+{
+	if (htmm_cxl_mode)
+	    return sysfs_emit(buf, "CXL-emulated: %s\n", "[enabled] disabled");
+	else
+	    return sysfs_emit(buf, "CXL-emulated: %s\n", "enabled [disabled]");
+}
+
+static ssize_t htmm_cxl_mode_store(struct kobject *kobj,
+				   struct kobj_attribute *attr,
+				   const char *buf, size_t count)
+{
+    if (sysfs_streq(buf, "enabled"))
+	htmm_cxl_mode = true;
+    else if (sysfs_streq(buf, "disabled"))
+	htmm_cxl_mode = false;
+    else
+	return -EINVAL;
+
+    return count;
+}
+
+static struct kobj_attribute htmm_cxl_mode_attr = 
+	__ATTR(htmm_cxl_mode, 0644, htmm_cxl_mode_show,
+	       htmm_cxl_mode_store);
+
 static ssize_t htmm_mode_show(struct kobject *kobj,
 			      struct kobj_attribute *attr, char *buf)
 {
@@ -3494,6 +3559,8 @@ static struct attribute *htmm_attrs[] = {
 	&htmm_thres_adjust_attr.attr,
 	&htmm_util_weight_attr.attr,
 	&htmm_mode_attr.attr,
+	&htmm_gamma_attr.attr,
+	&htmm_cxl_mode_attr.attr,
 	NULL,
 };
 

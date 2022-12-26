@@ -956,14 +956,9 @@ static bool cooling_page_one(struct page *page, struct vm_area_struct *vma,
 		    pginfo->total_accesses >>= 1;
 
 		cur_idx = get_idx(pginfo->total_accesses);
-		if (htmm_mode == HTMM_HUGEPAGE_OPT) {
-		    hca->memcg->bp_hotness_hg[cur_idx]++;
-		    hca->memcg->ebp_hotness_hg[cur_idx]++;
-		    //hca->memcg->access_map[get_idx(prev_accessed)]--;
-		    //hca->memcg->access_map[cur_idx]++;
-		} else {
-		    hca->memcg->access_map[cur_idx]++;
-		}
+		hca->memcg->hotness_hg[cur_idx]++;
+		hca->memcg->bp_hotness_hg[cur_idx]++;
+		hca->memcg->ebp_hotness_hg[cur_idx]++;
 
 		if (cur_idx >= (hca->memcg->active_threshold - 1))
 		    hca->page_is_hot = 2;
@@ -977,7 +972,7 @@ static bool cooling_page_one(struct page *page, struct vm_area_struct *vma,
 		
 	    }
 	    spin_unlock(&hca->memcg->access_lock);
-
+#if 0
 	    if (transhuge_vma_suitable(pvmw.vma, haddr)) {
 		huge_region_t *node;
 		struct mm_struct *mm = pvmw.vma->vm_mm;
@@ -1018,6 +1013,7 @@ static bool cooling_page_one(struct page *page, struct vm_area_struct *vma,
 
 		spin_unlock(&mm->hri.lock);
 	    }
+#endif
 	} else if (pvmw.pmd) {
 	    continue;
 
@@ -1065,19 +1061,16 @@ static bool cooling_page_one(struct page *page, struct vm_area_struct *vma,
 			prev_idx = get_idx(prev_accessed);
 			cur_idx = get_idx(meta->total_accesses);
 
-			if (htmm_mode == HTMM_HUGEPAGE_OPT) {
-			    cur_idx = meta->total_accesses + meta->hot_utils * htmm_util_weight / 10;
-			    cur_idx = get_idx(cur_idx);
-			    prev_idx = meta->idx;
-			    hca->memcg->hotness_hg[cur_idx] += HPAGE_PMD_NR;
-			    meta->idx = cur_idx;
+			cur_idx = meta->total_accesses + meta->hot_utils * htmm_util_weight / 10;
+			cur_idx = get_idx(cur_idx);
+			prev_idx = meta->idx;
+			hca->memcg->hotness_hg[cur_idx] += HPAGE_PMD_NR;
+			hca->memcg->hp_hotness_hg[cur_idx] += HPAGE_PMD_NR;
+			meta->idx = cur_idx;
 
-			    hca->memcg->access_map[prev_idx] -= HPAGE_PMD_NR;
-			    hca->memcg->access_map[cur_idx] += HPAGE_PMD_NR;
-			}
-			else
-			    hca->memcg->access_map[cur_idx] += HPAGE_PMD_NR;
-			
+			hca->memcg->access_map[prev_idx] -= HPAGE_PMD_NR;
+			hca->memcg->access_map[cur_idx] += HPAGE_PMD_NR;
+
 			if (cur_idx >= hca->memcg->active_threshold)
 			    hca->page_is_hot = 2;
 			else {

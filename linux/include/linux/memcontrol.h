@@ -147,6 +147,7 @@ struct mem_cgroup_per_node {
 	bool			need_cooling;
 	bool			need_adjusting;
 	bool			need_adjusting_all;
+	bool			need_demotion;
 	struct deferred_split	deferred_split_queue;
 	struct list_head	deferred_list;
 #endif
@@ -357,64 +358,46 @@ struct mem_cgroup {
 
 #ifdef CONFIG_HTMM /* struct mem_cgroup */
 	bool htmm_enabled;
-	unsigned long max_nr_dram_pages;
+	unsigned long max_nr_dram_pages; /* the maximum number of pages */
 	unsigned long nr_active_pages; /* updated by need_lru_cooling() */
-	unsigned long htmm_next_cooling;
-	unsigned long nr_sampled;
-	unsigned long nr_sampled_for_split;
-	unsigned long nr_dram_sampled;
-	unsigned long prev_dram_sampled;
-	unsigned long prev_max_dram_sampled;
-	unsigned int active_threshold;
+	/* stat for sampled accesses */
+	unsigned long nr_sampled; /* the total number of sampled accesses */
+	unsigned long nr_sampled_for_split; /* nr_sampled for split decision */
+	unsigned long nr_dram_sampled; /* accesses to DRAM: n(i) */
+	unsigned long prev_dram_sampled; /* accesses to DRAM n(i-1) */
+	unsigned long max_dram_sampled; /* accesses to DRAM (estimated) */
+	unsigned long prev_max_dram_sampled; /* accesses to DRAM (estimated) */
+	/* thresholds */
+	unsigned int active_threshold; /* hot */
 	unsigned int warm_threshold;
-	unsigned int bp_active_threshold; /* expected thres. for the THP-disabled case (i.e., 4KB (base) page) */
+	unsigned int bp_active_threshold; /* expected threshold */
 	/* split */
 	unsigned int split_threshold;
 	unsigned int split_active_threshold;
 	unsigned int nr_split;
 	unsigned int nr_split_tail_idx;
+	/* used to calculated avg_samples_hp. see check_transhuge_cooling() */
 	unsigned int sum_util;
 	unsigned int num_util;
-	/* access_map is updated by PEBS thread */
-	/* [0]: 0-1	    
-	 * [1]: 2-3    
-	 * [2]: 4-7	    
-	 * [3]: 8-15	    
-	 * [4]: 16-31	    
-	 * [5]: 32-63
-	 * [6]: 64-127
-	 * [7]: 128-255
-	 * [8]: 256-511
-	 * [9]: 512-1023
-	 * [10]: 1024-2047
-	 * [11]: 2048-
-	 */
-	/**/
+	/*  */
 	unsigned long access_map[21];
+	/* histograms. exponential scale */
 	/* "hotness_map" is used to determine the hot page threshold.
-	 * "bp_hotness_map" is used to accurately determine
-	 * the expected DRAM/NVM sample ratio when the system uses 4KB (base) pages.
+	 * "ebp_hotness_map" is used to accurately determine
+	 * the expected DRAM hit ratio when the system only uses 4KB (base) pages.
 	 */
-	unsigned long hotness_hg[16]; // 
-	unsigned long hp_hotness_hg[16]; // huge page
-	unsigned long bp_hotness_hg[16]; // base page
+	unsigned long hotness_hg[16]; // page access histogram
+	unsigned long hp_hotness_hg[16]; // huge page --> tmp used for anal
+	unsigned long bp_hotness_hg[16]; // base page --> tmp used for anal
 	unsigned long ebp_hotness_hg[16]; // expected bage page
-	unsigned long base_map[2];
-
-	unsigned int pages_per_util[513]; // TODO removed.
-
+	/* lock for histogram */
 	spinlock_t access_lock;
-	bool cooling_status;
+	/* etc */
+	bool cooled;
+	bool split_happen;
 	bool need_split;
-	unsigned int history_clock;
 	unsigned int cooling_clock;
-	/* pt-based cooling.. not used */
-	unsigned long count;
-	spinlock_t htmm_mm_list_lock;
-	struct list_head htmm_mm_list;
-	struct list_head cooling_entry;
-#endif
-
+#endif /* CONFIG_HTMM */
 	struct mem_cgroup_per_node *nodeinfo[];
 };
 
