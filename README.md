@@ -2,13 +2,10 @@
 
 ## Kernel Config.
 ```
-# In .config file
-...
 CONFIG_HTMM=y
-...
 ```
 
 ## Options
 ```
-# manages htmm option via /sys/kernel/mm/htmm/*
+# manages memtis option via /sys/kernel/mm/htmm/*
 ```
