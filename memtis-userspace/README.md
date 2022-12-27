@@ -3,6 +3,12 @@
 ## Benchmarks
 see bench\_dir/README.md
 
+## Using Intel Optane DC PMM
+```
+sudo daxctl reconfigure-device dax0.0 --mode=system-ram
+sudo daxctl reconfigure-device dax1.0 --mode=system-ram
+```
+
 ## build
 ```
 make
