@@ -10,14 +10,20 @@ make
 or
 ```
 make all
+# This additionally build the benchmarks
 ```
 
 ## run
+see options
+```
+./scripts/run_bench.sh --help
+```
+execute
 ```
 sudo ./run.sh
 ```
 
-## other systems
+## Setting for other systems
 ### Limits the DRAM size
 * AutoNUMA, AutoTiering, Tiering-0.8, TPP: use memmap option
     * e.g., grubby --args="memmap=000M\!000M" --update-kernel=${kernel path or number}
