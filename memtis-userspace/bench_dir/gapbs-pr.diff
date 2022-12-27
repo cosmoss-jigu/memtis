@@ -1,0 +1,11 @@
+--- a/benchmark/bench.mk	2022-12-27 08:52:32.813977074 -0500
++++ b/benchmark/bench.mk	2022-12-27 08:51:52.705657102 -0500
+@@ -22,6 +22,8 @@
+ .PHONY: bench-graphs
+ bench-graphs: $(RAW_GRAPH_DIR) $(ALL_GRAPHS_WITH_PATHS)
+ 
++.PHONY: gen-twitter
++gen-twitter: ${RAW_GRAPH_DIR} ${GRAPH_DIR}/twitter.sg
+ 
+ # Real-world
+ 

@@ -1,0 +1,11 @@
+--- a/Makefile	2022-12-27 08:21:33.251915935 -0500
++++ b/Makefile	2022-12-27 08:25:29.793478993 -0500
+@@ -33,6 +33,8 @@
+ blas/blas.a: blas/*.c blas/*.h
+ 	make -C blas OPTFLAGS='$(CFLAGS)' CC='$(CC)';
+ 
++include ../datasets.mk
++
+ clean:
+ 	make -C blas clean
+ 	make -C matlab clean
