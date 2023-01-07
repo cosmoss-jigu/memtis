@@ -3025,7 +3025,7 @@ unsigned int htmm_sample_period = 401;
 unsigned int htmm_inst_sample_period = 10007;
 unsigned int htmm_thres_hot = 2;
 unsigned int htmm_thres_cold = 2000000;
-unsigned int htmm_thres_huge_hot = 2;
+unsigned int htmm_split_period = 2; /* used to shift the wss of memcg */
 unsigned int htmm_min_cooling_interval = 5000; /* in ms, 5s */
 unsigned int htmm_max_cooling_interval = 1000; /* in ms, 60s */
 unsigned int htmm_demotion_period_in_ms = 100;
@@ -3148,13 +3148,13 @@ static struct kobj_attribute htmm_inst_sample_period_attr =
 	__ATTR(htmm_inst_sample_period, 0644, htmm_inst_sample_period_show,
 	       htmm_inst_sample_period_store);
 
-static ssize_t htmm_thres_huge_hot_show(struct kobject *kobj,
+static ssize_t htmm_split_period_show(struct kobject *kobj,
 				   struct kobj_attribute *attr, char *buf)
 {
-	return sysfs_emit(buf, "%u\n", htmm_thres_huge_hot);
+	return sysfs_emit(buf, "%u\n", htmm_split_period);
 }
 
-static ssize_t htmm_thres_huge_hot_store(struct kobject *kobj,
+static ssize_t htmm_split_period_store(struct kobject *kobj,
 				    struct kobj_attribute *attr,
 				    const char *buf, size_t count)
 {
@@ -3165,13 +3165,13 @@ static ssize_t htmm_thres_huge_hot_store(struct kobject *kobj,
 	if (err)
 		return err;
 
-	WRITE_ONCE(htmm_thres_huge_hot, thres);
+	WRITE_ONCE(htmm_split_period, thres);
 	return count;
 }
 
-static struct kobj_attribute htmm_thres_huge_hot_attr =
-	__ATTR(htmm_thres_huge_hot, 0644, htmm_thres_huge_hot_show,
-	       htmm_thres_huge_hot_store);
+static struct kobj_attribute htmm_split_period_attr =
+	__ATTR(htmm_split_period, 0644, htmm_split_period_show,
+	       htmm_split_period_store);
 
 
 static ssize_t htmm_thres_hot_show(struct kobject *kobj,
@@ -3546,7 +3546,7 @@ static struct kobj_attribute htmm_mode_attr =
 static struct attribute *htmm_attrs[] = {
 	&htmm_sample_period_attr.attr,
 	&htmm_inst_sample_period_attr.attr,
-	&htmm_thres_huge_hot_attr.attr,
+	&htmm_split_period_attr.attr,
 	&htmm_thres_hot_attr.attr,
 	&htmm_thres_cold_attr.attr,
 	&htmm_min_cooling_interval_attr.attr,

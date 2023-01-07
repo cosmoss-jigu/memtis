@@ -12567,7 +12567,7 @@ unlock:
     return ret;
 }
 
-/* sys_perf_event_open for htmm use */
+/* sys_perf_event_open for memtis use */
 int htmm__perf_event_open(struct perf_event_attr *attr_ptr, pid_t pid,
 	int cpu, int group_fd, unsigned long flags)
 {

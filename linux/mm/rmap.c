@@ -957,7 +957,6 @@ static bool cooling_page_one(struct page *page, struct vm_area_struct *vma,
 
 		cur_idx = get_idx(pginfo->total_accesses);
 		hca->memcg->hotness_hg[cur_idx]++;
-		hca->memcg->bp_hotness_hg[cur_idx]++;
 		hca->memcg->ebp_hotness_hg[cur_idx]++;
 
 		if (cur_idx >= (hca->memcg->active_threshold - 1))
@@ -1015,73 +1014,8 @@ static bool cooling_page_one(struct page *page, struct vm_area_struct *vma,
 	    }
 #endif
 	} else if (pvmw.pmd) {
+	    /* do nothing */
 	    continue;
-
-	    if (pmd_trans_huge(*pvmw.pmd) || pmd_devmap(*pvmw.pmd)) {
-		unsigned long prev_accessed, prev_idx, cur_idx;
-		unsigned long memcg_cclock;
-		int i, idx, offset;
-		struct page *meta;
-
-		meta = get_meta_page(page);
-
-		VM_BUG_ON_PAGE(!PageCompound(page), page);
-
-		spin_lock(&hca->memcg->access_lock);
-		/* check cooling */
-		memcg_cclock = READ_ONCE(hca->memcg->cooling_clock);
-		if (memcg_cclock > meta->cooling_clock) {
-			int bal = 0, j;
-			unsigned int diff = memcg_cclock - meta->cooling_clock;
-			
-			/* perform cooling */
-			meta->hot_utils = 0;
-
-			for (i = 0; i < HPAGE_PMD_NR; i++) {
-			    idx = 4 + i / 4;
-			    offset = i % 4;
-
-			    pginfo = &(page[idx].compound_pginfo[offset]);
-			    pginfo->nr_accesses = 0;
-			    for (j = 0; j < diff; j++)
-				pginfo->total_accesses >>= 1;
-
-			    if (pginfo->total_accesses != 0)
-				meta->hot_utils++;
-
-			    cur_idx = get_idx(pginfo->total_accesses);
-			    if (cur_idx >= hca->memcg->active_threshold)
-				bal++;
-			}
-
-			/* for histogram management */
-			for (j = 0; j < diff; j++)
-			    meta->total_accesses >>= 1;
-
-			prev_idx = get_idx(prev_accessed);
-			cur_idx = get_idx(meta->total_accesses);
-
-			cur_idx = meta->total_accesses + meta->hot_utils * htmm_util_weight / 10;
-			cur_idx = get_idx(cur_idx);
-			prev_idx = meta->idx;
-			hca->memcg->hotness_hg[cur_idx] += HPAGE_PMD_NR;
-			hca->memcg->hp_hotness_hg[cur_idx] += HPAGE_PMD_NR;
-			meta->idx = cur_idx;
-
-			hca->memcg->access_map[prev_idx] -= HPAGE_PMD_NR;
-			hca->memcg->access_map[cur_idx] += HPAGE_PMD_NR;
-
-			if (cur_idx >= hca->memcg->active_threshold)
-			    hca->page_is_hot = 2;
-			else {
-			    hca->page_is_hot = 1;
-			}
-
-			meta->cooling_clock = memcg_cclock;
-		}
-		
-		spin_unlock(&hca->memcg->access_lock);
-	    }
 	}
     }
 
@@ -1150,28 +1084,9 @@ static bool page_check_hotness_one(struct page *page, struct vm_area_struct *vma
 		hca->page_is_hot = 2;
 	    else
 		hca->page_is_hot = 1;
-#if 0
-	    if (cur_idx >= (hca->memcg->bp_active_threshold - 1))
-		pginfo->may_hot = true;
-	    else
-		pginfo->may_hot = false;
-#endif
 	} else if (pvmw.pmd) {
+	    /* do nothing */
 	    continue;
-
-	    if (pmd_trans_huge(*pvmw.pmd) || pmd_devmap(*pvmw.pmd)) {
-		unsigned long cur_idx;
-		struct page *meta;
-		
-		meta = get_meta_page(page);
-		VM_BUG_ON_PAGE(!PageCompound(page), page);
-	
-		cur_idx = meta->idx;
-		if (cur_idx >= hca->memcg->active_threshold)
-		    hca->page_is_hot = 2;
-		else
-		    hca->page_is_hot = 1;
-	    }
 	}
     }
 

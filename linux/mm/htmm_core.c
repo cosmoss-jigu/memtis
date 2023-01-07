@@ -201,7 +201,6 @@ void check_transhuge_cooling(void *arg, struct page *page, bool locked)
 	    cur_idx = meta_page->total_accesses;
 	    cur_idx = get_idx(cur_idx);
 	    memcg->hotness_hg[cur_idx] += HPAGE_PMD_NR;
-	    memcg->hp_hotness_hg[cur_idx] += HPAGE_PMD_NR;
 	    meta_page->idx = cur_idx;
 
 	    /* updates skewness */
@@ -258,7 +257,6 @@ void check_base_cooling(pginfo_t *pginfo, struct page *page, bool locked)
 	    
 	cur_idx = get_idx(pginfo->total_accesses);
 	memcg->hotness_hg[cur_idx]++;
-	memcg->bp_hotness_hg[cur_idx]++;
 	memcg->ebp_hotness_hg[cur_idx]++;
 
 	pginfo->cooling_clock = memcg_cclock;
@@ -363,7 +361,6 @@ void check_failed_list(struct mem_cgroup_per_node *pn,
 	idx = meta->idx;
 
 	spin_lock(&memcg->access_lock);
-	memcg->hp_hotness_hg[idx] += HPAGE_PMD_NR;
 	memcg->hotness_hg[idx] += HPAGE_PMD_NR;
 	spin_unlock(&memcg->access_lock);
     }
@@ -490,19 +487,6 @@ void putback_split_pages(struct list_head *split_list, struct lruvec *lruvec)
 	page = lru_to_page(split_list);
 	list_del(&page->lru);
 
-#if 0
-	if (page_count(page) == 1) {
-	    ClearPageActive(page);
-	    ClearPageUnevictable(page);
-	    if (unlikely(__PageMovable(page))) {
-		lock_page(page);
-		if (!PageMovable(page))
-		    __ClearPageIsolated(page);
-		unlock_page(page);
-	    }
-	}
-#endif
-
 	if (unlikely(!page_evictable(page))) {
 	    putback_lru_page(page);
 	    continue;
@@ -621,8 +605,6 @@ void uncharge_htmm_pte(pte_t *pte, struct mem_cgroup *memcg)
     spin_lock(&memcg->access_lock);
     if (memcg->hotness_hg[idx] > 0)
 	memcg->hotness_hg[idx]--;
-    if (memcg->bp_hotness_hg[idx] > 0)
-	memcg->bp_hotness_hg[idx]--;
     if (memcg->ebp_hotness_hg[idx] > 0)
 	memcg->ebp_hotness_hg[idx]--;
     spin_unlock(&memcg->access_lock);
@@ -648,12 +630,6 @@ void uncharge_htmm_page(struct page *page, struct mem_cgroup *memcg)
 	    memcg->hotness_hg[idx] -= nr_pages;
 	else
 	    memcg->hotness_hg[idx] = 0;
-	if (memcg->hp_hotness_hg[idx] >= nr_pages)
-	    memcg->hp_hotness_hg[idx] -= nr_pages;
-	else
-	    memcg->hp_hotness_hg[idx] = 0;
-
-
 	
 	for (i = 0; i < HPAGE_PMD_NR; i++) {
 	    int base_idx = 4 + i / 4;
@@ -894,11 +870,7 @@ static void update_base_page(struct vm_area_struct *vma,
     if (prev_idx != cur_idx) {
 	if (memcg->hotness_hg[prev_idx] > 0)
 	    memcg->hotness_hg[prev_idx]--;
-	if (memcg->bp_hotness_hg[prev_idx] > 0)
-	    memcg->bp_hotness_hg[prev_idx]--;
-
 	memcg->hotness_hg[cur_idx]++;
-	memcg->bp_hotness_hg[cur_idx]++;
 
 	if (memcg->ebp_hotness_hg[prev_idx] > 0)
 	    memcg->ebp_hotness_hg[prev_idx]--;
@@ -949,7 +921,7 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
     }
 #endif
 
-    /* base page */
+    /*subpage */
     prev_idx = get_idx(pginfo_prev);
     cur_idx = get_idx(pginfo->total_accesses);
     spin_lock(&memcg->access_lock);
@@ -977,13 +949,7 @@ static void update_huge_page(struct vm_area_struct *vma, pmd_t *pmd,
 	else
 	    memcg->hotness_hg[prev_idx] = 0;
 
-	if (memcg->hp_hotness_hg[prev_idx] >= HPAGE_PMD_NR)
-	    memcg->hp_hotness_hg[prev_idx] -= HPAGE_PMD_NR;
-	else
-	    memcg->hp_hotness_hg[prev_idx] = 0;
-
 	memcg->hotness_hg[cur_idx] += HPAGE_PMD_NR;
-	memcg->hp_hotness_hg[cur_idx] += HPAGE_PMD_NR;
 	spin_unlock(&memcg->access_lock);
     }
     meta_page->idx = cur_idx;
@@ -1217,9 +1183,6 @@ static void reset_memcg_stat(struct mem_cgroup *memcg)
     for (i = 0; i < 16; i++) {
 	memcg->hotness_hg[i] = 0;
 	memcg->ebp_hotness_hg[i] = 0;
-	/* for anal */
-	memcg->bp_hotness_hg[i] = 0;
-	memcg->hp_hotness_hg[i] = 0;
     }
 
     memcg->sum_util = 0;
@@ -1262,7 +1225,6 @@ static void __adjust_active_threshold(struct mm_struct *mm,
 
     for (idx_hot = 15; idx_hot >= 0; idx_hot--) {
 	unsigned long nr_pages = memcg->hotness_hg[idx_hot];
-	//unsigned long nr_pages = (memcg->bp_hotness_hg[idx_hot] + memcg->hp_hotness_hg[idx_hot]);
 	if (nr_active + nr_pages > memcg->max_nr_dram_pages)
 	    break;
 	nr_active += nr_pages;
@@ -1396,7 +1358,11 @@ void update_pginfo(pid_t pid, unsigned long address, enum events e)
 	/* split decision period */
 	if (!memcg->need_split) {
 	    unsigned long usage = page_counter_read(&memcg->memory);
-	    usage >>= htmm_thres_huge_hot;
+	    /* htmm_split_period: 2 by default
+	     * This means that the number of sampled records should 
+	     * exceed a quarter of the WSS
+	     */
+	    usage >>= htmm_split_period;
 
 	    if (memcg->nr_sampled_for_split > usage) {
 		memcg->need_split = true;

@@ -633,6 +633,7 @@ struct mm_struct {
 
 #ifdef CONFIG_HTMM
 		bool htmm_enabled;
+		// below variables are not used 
 		struct xarray root_huge_region_map;
 		struct huge_region_info hri;
 		struct list_head memcg_entry;

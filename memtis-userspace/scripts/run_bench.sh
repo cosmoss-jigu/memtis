@@ -28,7 +28,7 @@ function func_memtis_setting() {
     echo 100007 | tee /sys/kernel/mm/htmm/htmm_inst_sample_period
     echo 1 | tee /sys/kernel/mm/htmm/htmm_thres_hot
     echo 0 | tee /sys/kernel/mm/htmm/htmm_static_thres
-    echo 2 | tee /sys/kernel/mm/htmm/htmm_thres_huge_hot 
+    echo 2 | tee /sys/kernel/mm/htmm/htmm_split_period
     echo 100000 | tee /sys/kernel/mm/htmm/htmm_thres_adjust
     echo 2000000 | tee /sys/kernel/mm/htmm/htmm_thres_cold
     echo 2 | tee /sys/kernel/mm/htmm/htmm_mode

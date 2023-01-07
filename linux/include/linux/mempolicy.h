@@ -188,7 +188,7 @@ extern bool numa_demotion_enabled;
 #ifdef CONFIG_HTMM
 extern unsigned int htmm_sample_period;
 extern unsigned int htmm_inst_sample_period;
-extern unsigned int htmm_thres_huge_hot;
+extern unsigned int htmm_split_period;
 extern unsigned int htmm_thres_hot;
 extern unsigned int htmm_thres_cold;
 extern unsigned int htmm_min_cooling_interval;

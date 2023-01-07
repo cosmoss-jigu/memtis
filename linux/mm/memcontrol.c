@@ -5259,8 +5259,6 @@ static struct mem_cgroup *mem_cgroup_alloc(void)
 	    memcg->access_map[i] = 0;
 	for (i = 0; i < 16; i++) {
 	    memcg->hotness_hg[i] = 0;
-	    memcg->bp_hotness_hg[i] = 0;
-	    memcg->hp_hotness_hg[i] = 0;
 	    memcg->ebp_hotness_hg[i] = 0;
 	}
 
@@ -7646,12 +7644,8 @@ static int memcg_access_map_show(struct seq_file *m, void *v)
     }
 
     for (i = 15; i >= 0; i--) {
-	/*
-	seq_buf_printf(&s, "access_map[%2d]: %10lu  hp_hotness_hg[%2d]: %10lu	bp_hotness_hg[%2d]: %10lu   ebp_hotness_hg[%2d]: %10lu\n",
-		i, memcg->access_map[i], i, memcg->hp_hotness_hg[i], i, memcg->bp_hotness_hg[i], i, memcg->ebp_hotness_hg[i]);
-	*/
-	seq_buf_printf(&s, "access_map[%2d]: %10lu  hotness_hg[%2d]: %10lu  hp_hotness_hg[%2d]: %10lu	bp_hotness_hg[%2d]: %10lu   ebp_hotness_hg[%2d]: %10lu\n",
-		i, memcg->access_map[i], i, memcg->hotness_hg[i], i, memcg->hp_hotness_hg[i], i, memcg->bp_hotness_hg[i], i, memcg->ebp_hotness_hg[i]);
+	seq_buf_printf(&s, "access_map[%2d]: %10lu  hotness_hg[%2d]: %10lu  ebp_hotness_hg[%2d]: %10lu\n",
+		i, memcg->access_map[i], i, memcg->hotness_hg[i], i, memcg->ebp_hotness_hg[i]);
 
 
     }
@@ -7692,13 +7686,10 @@ static int memcg_hotness_stat_show(struct seq_file *m, void *v)
 
     for (i = 15; i >= 0; i--) {
 	if (i >= memcg->active_threshold)
-	    //hot += (memcg->hp_hotness_hg[i] + memcg->bp_hotness_hg[i]);
 	    hot += memcg->hotness_hg[i];
 	else if (i >= memcg->warm_threshold)
-	    //warm += (memcg->hp_hotness_hg[i] + memcg->bp_hotness_hg[i]);
 	    warm += memcg->hotness_hg[i];
 	else
-	    //cold += (memcg->hp_hotness_hg[i] + memcg->bp_hotness_hg[i]);    
 	    cold += memcg->hotness_hg[i];
     }
 

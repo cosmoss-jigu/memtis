@@ -173,8 +173,6 @@ static bool promotion_available(int target_nid, struct mem_cgroup *memcg,
 	return true;
     }
     else if (cur_nr_pages + nr_isolated < max_nr_pages) {
-	/* almost isolated pages would be demoted to the capacity-tier,
-	 * so we add some value (HTMM_MIN_FREE_PAGES) in the above 'if' statement. */
 	*nr_to_promote = max_nr_pages - cur_nr_pages - nr_isolated;
 	return true;
     }
@@ -742,6 +740,7 @@ re_cooling:
 	nr_max_scan--;
     } while (nr_scanned < nr_to_scan && nr_max_scan);
 
+    // v2 is always true;
     if (v2 && is_active_lru(lru)) {
 	lru = LRU_INACTIVE_ANON;
 	nr_max_scan = 12;
@@ -969,7 +968,7 @@ static int kmigraterd_demotion(pg_data_t *pgdat)
 	    demote_node(pgdat, memcg, nr_exceeded);
 	}
 
-	/* default: wait 100 ms */
+	/* default: wait 50 ms */
 	msleep_interruptible(htmm_demotion_period_in_ms);
     }
     return 0;

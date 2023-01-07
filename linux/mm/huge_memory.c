@@ -2153,7 +2153,6 @@ static void __split_huge_pmd_locked(struct vm_area_struct *vma, pmd_t *pmd,
 
 		spin_lock(&memcg->access_lock);
 		memcg->hotness_hg[get_idx(pte_pginfo->total_accesses)]++;
-		memcg->bp_hotness_hg[get_idx(pte_pginfo->total_accesses)]++;
 		spin_unlock(&memcg->access_lock);
 		/* Htmm flag will be cleared later */
 		/* ClearPageHtmm(&page[i]); */
@@ -2834,11 +2833,6 @@ int split_huge_page_to_list(struct page *page, struct list_head *list)
 			memcg->hotness_hg[idx] = 0;
 		    else
 			memcg->hotness_hg[idx] -= HPAGE_PMD_NR;
-
-		    if (memcg->hp_hotness_hg[idx] < HPAGE_PMD_NR)
-			memcg->hp_hotness_hg[idx] = 0;
-		    else
-			memcg->hp_hotness_hg[idx] -= HPAGE_PMD_NR;
 
 		    spin_unlock(&memcg->access_lock);
 		}

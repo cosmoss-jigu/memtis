@@ -192,9 +192,6 @@ static int ksamplingd(void *data)
 			    break;
 			}
 
-			if (htmm_mode == 99999) //ex
-			    continue;
-
 			update_pginfo(he->pid, he->addr, event);
 			//count_vm_event(HTMM_NR_SAMPLED);
 			nr_sampled++;
