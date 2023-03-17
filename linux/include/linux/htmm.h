@@ -30,6 +30,41 @@
 
 #define MULTIPLIER  4
 
+#define pcount 30
+/* onle prime numbers */
+static const unsigned int pebs_period_list[pcount] = {
+    199,    // 200 - min
+    293,    // 300
+    401,    // 400
+    499,    // 500
+    599,    // 600
+    701,    // 700
+    797,    // 800
+    907,    // 900
+    997,    // 1000
+    1201,   // 1200
+    1399,   // 1400
+    1601,   // 1600
+    1801,   // 1800
+    1999,   // 2000
+    2503,   // 2500
+    3001,   // 3000
+    3499,   // 3500
+    4001,   // 4000
+    4507,   // 4507
+    4999,   // 5000
+    6007,   // 6000
+    7001,   // 7000
+    7993,   // 8000
+    9001,   // 9000
+    10007,  // 10000
+    12007,  // 12000
+    13999,  // 14000
+    16001,  // 16000
+    17989,  // 18000
+    19997,  // 20000 - max
+};
+
 struct htmm_event {
     struct perf_event_header header;
     __u64 ip;
@@ -116,6 +151,33 @@ extern void *huge_region_insert(struct mm_struct *mm, unsigned long addr,
 /* htmm_sampler.c */
 extern int ksamplingd_init(pid_t pid, int node);
 extern void ksamplingd_exit(void);
+
+static inline unsigned long get_sample_period(unsigned cur) {
+    if (cur < 0)
+	return 0;
+    else if (cur < pcount)
+	return pebs_period_list[cur];
+    else
+	return pebs_period_list[pcount - 1];
+}
+
+static inline unsigned int increase_sample_period(unsigned int cur,
+						  unsigned int next) {
+    do {
+	cur++;
+    } while (pebs_period_list[cur] < next && cur < pcount);
+    
+    return cur < pcount ? cur : pcount - 1;
+}
+
+static inline unsigned int decrease_sample_period(unsigned int cur,
+						  unsigned int next) {
+    do {
+	cur--;
+    } while (pebs_period_list[cur] > next && cur > 0);
+    
+    return cur;
+}
 
 /* htmm_migrater.c */
 #define HTMM_MIN_FREE_PAGES 256 * 10 // 10MB

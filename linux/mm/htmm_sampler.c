@@ -7,6 +7,7 @@
 #include <linux/sched.h>
 #include <linux/perf_event.h>
 #include <linux/delay.h>
+#include <linux/sched/cputime.h>
 
 #include "../kernel/events/internal.h"
 
@@ -61,7 +62,7 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
     if (config == ALL_STORES)
 	attr.sample_period = htmm_inst_sample_period;
     else
-	attr.sample_period = htmm_sample_period;
+	attr.sample_period = get_sample_period(0);
     attr.sample_type = PERF_SAMPLE_IP | PERF_SAMPLE_TID | PERF_SAMPLE_ADDR;
     attr.disabled = 0;
     attr.exclude_kernel = 1;
@@ -69,6 +70,7 @@ static int __perf_event_open(__u64 config, __u64 config1, __u64 cpu,
     attr.exclude_callchain_kernel = 1;
     attr.exclude_callchain_user = 1;
     attr.precise_ip = 1;
+    attr.enable_on_exec = 1;
 
     if (pid == 0)
 	__pid = -1;
@@ -131,11 +133,71 @@ static void pebs_disable(void)
     }
 }
 
+static void pebs_enable(void)
+{
+    int cpu, event;
+
+    printk("pebs enable\n");
+    for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
+	for (event = 0; event < N_HTMMEVENTS; event++) {
+	    if (mem_event[cpu][event])
+		perf_event_enable(mem_event[cpu][event]);
+	}
+    }
+}
+
+static void pebs_update_period(uint64_t value)
+{
+    int cpu, event;
+
+    for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
+	for (event = 0; event < N_HTMMEVENTS; event++) {
+	    int ret;
+	    if (!mem_event[cpu][event])
+		continue;
+
+	    switch (event) {
+		case DRAMREAD:
+		case NVMREAD:
+		case CXLREAD:
+		    ret = perf_event_period(mem_event[cpu][event], value);
+		    break;
+		default:
+		    ret = 0;
+		    break;
+	    }
+
+	    if (ret == -EINVAL)
+		printk("failed to update sample period");
+	}
+    }
+}
+
 static int ksamplingd(void *data)
 {
     unsigned long long nr_sampled = 0, nr_dram = 0, nr_nvm = 0, nr_write = 0;
-    unsigned long long nr_throttled = 0;
-    unsigned long long nr_unknown = 0;
+    unsigned long long nr_throttled = 0, nr_lost = 0, nr_unknown = 0;
+    unsigned long long nr_skip = 0;
+
+    /* used for calculating average cpu usage of ksampled */
+    struct task_struct *t = current;
+    /* a unit of cputime: permil (1/1000) */
+    u64 total_runtime, exec_runtime, cputime = 0;
+    unsigned long total_cputime, elapsed_cputime, cur;
+    /* used for periodic checks*/
+    unsigned long cpucap_period = msecs_to_jiffies(15000); // 15s
+    unsigned long sample_period = 0;
+    /* report cpu/period stat */
+    unsigned long trace_cputime, trace_period = msecs_to_jiffies(3000); // 3s
+    unsigned long trace_runtime;
+    /* for timeout */ 
+    unsigned long tmp, sleep_timeout;
+
+    /* orig impl: see read_sum_exec_runtime() */
+    trace_runtime = total_runtime = exec_runtime = t->se.sum_exec_runtime;
+
+    trace_cputime = total_cputime = elapsed_cputime = jiffies;
+    sleep_timeout = usecs_to_jiffies(2000);
 
     /* TODO implements per-CPU node ksamplingd by using pg_data_t */
     /* Currently uses a single CPU node(0) */
@@ -144,89 +206,176 @@ static int ksamplingd(void *data)
 	do_set_cpus_allowed(access_sampling, cpumask);
 
     while (!kthread_should_stop()) {
-	int cpu, event;
+	int cpu, event, cond = false;
     
 	if (htmm_mode == HTMM_NO_MIG) {
 	    msleep_interruptible(10000);
 	    continue;
 	}
-
+	
 	for (cpu = 0; cpu < CPUS_PER_SOCKET; cpu++) {
 	    for (event = 0; event < N_HTMMEVENTS; event++) {
-		struct perf_buffer *rb;
-		struct perf_event_mmap_page *up;
-		struct perf_event_header *ph;
-		struct htmm_event *he;
-		unsigned long pg_index, offset;
-		int page_shift;
-		
-		if (!mem_event[cpu][event])
-		    continue;
+		do {
+		    struct perf_buffer *rb;
+		    struct perf_event_mmap_page *up;
+		    struct perf_event_header *ph;
+		    struct htmm_event *he;
+		    unsigned long pg_index, offset;
+		    int page_shift;
+		    __u64 head;
 
-		__sync_synchronize();
+		    if (!mem_event[cpu][event]) {
+			//continue;
+			break;
+		    }
 
-		rb = mem_event[cpu][event]->rb;
-		if (!rb) {
-		    printk("event->rb is NULL\n");
-		    return -1;
-		}
-		/* perf_buffer is ring buffer */
-		up = READ_ONCE(rb->user_page);
-		if (READ_ONCE(up->data_head) == up->data_tail) {
-		    continue;
-		}
-		/* read barrier */
-		smp_rmb();
-	
-		page_shift = PAGE_SHIFT + page_order(rb);
-		/* get address of a tail sample */
-		offset = READ_ONCE(up->data_tail);
-		pg_index = (offset >> page_shift) & (rb->nr_pages - 1);
-		offset &= (1 << page_shift) - 1;
+		    __sync_synchronize();
 
-		ph = (void*)(rb->data_pages[pg_index] + offset);
-		switch (ph->type) {
-		    case PERF_RECORD_SAMPLE:
-			he = (struct htmm_event *)ph;
-			if (!valid_va(he->addr)) {
+		    rb = mem_event[cpu][event]->rb;
+		    if (!rb) {
+			printk("event->rb is NULL\n");
+			return -1;
+		    }
+		    /* perf_buffer is ring buffer */
+		    up = READ_ONCE(rb->user_page);
+		    head = READ_ONCE(up->data_head);
+		    if (head == up->data_tail) {
+			if (cpu < 16)
+			    nr_skip++;
+			//continue;
+			break;
+		    }
+
+		    head -= up->data_tail;
+		    if (head > (BUFFER_SIZE * ksampled_max_sample_ratio / 100)) {
+			cond = true;
+		    } else if (head < (BUFFER_SIZE * ksampled_min_sample_ratio / 100)) {
+			cond = false;
+		    }
+
+		    /* read barrier */
+		    smp_rmb();
+
+		    page_shift = PAGE_SHIFT + page_order(rb);
+		    /* get address of a tail sample */
+		    offset = READ_ONCE(up->data_tail);
+		    pg_index = (offset >> page_shift) & (rb->nr_pages - 1);
+		    offset &= (1 << page_shift) - 1;
+
+		    ph = (void*)(rb->data_pages[pg_index] + offset);
+		    switch (ph->type) {
+			case PERF_RECORD_SAMPLE:
+			    he = (struct htmm_event *)ph;
+			    if (!valid_va(he->addr)) {
+				break;
+			    }
+
+			    update_pginfo(he->pid, he->addr, event);
+			    //count_vm_event(HTMM_NR_SAMPLED);
+			    nr_sampled++;
+
+			    if (event == DRAMREAD)
+				nr_dram++;
+			    else if (event == CXLREAD || event == NVMREAD)
+				nr_nvm++;
+			    else
+				nr_write++;
 			    break;
-			}
-
-			update_pginfo(he->pid, he->addr, event);
-			//count_vm_event(HTMM_NR_SAMPLED);
-			nr_sampled++;
-			if (event == DRAMREAD)
-			    nr_dram++;
-			else if (event == CXLREAD || event == NVMREAD)
-			    nr_nvm++;
-			else
-			    nr_write++;
-			break;
-		    case PERF_RECORD_THROTTLE:
-		    case PERF_RECORD_UNTHROTTLE:
-
-			nr_throttled++;
-		
-			break;
-		    default:
-			nr_unknown++;
-			break;
-		}
-		if (nr_sampled % 500000 == 0) {
-		    printk("nr_sampled: %llu, nr_dram: %llu, nr_nvm: %llu, nr_write: %llu, nr_throttled: %llu \n", nr_sampled, nr_dram, nr_nvm, nr_write, nr_throttled);
-		    nr_dram = 0;
-		    nr_nvm = 0;
-		    nr_write = 0;
-		}
-		/* read, write barrier */
-		smp_mb();
-		WRITE_ONCE(up->data_tail, up->data_tail + ph->size);
+			case PERF_RECORD_THROTTLE:
+			case PERF_RECORD_UNTHROTTLE:
+			    nr_throttled++;
+			    break;
+			case PERF_RECORD_LOST_SAMPLES:
+			    nr_lost ++;
+			    break;
+			default:
+			    nr_unknown++;
+			    break;
+		    }
+		    if (nr_sampled % 500000 == 0) {
+			printk("nr_sampled: %llu, nr_dram: %llu, nr_nvm: %llu, nr_write: %llu, nr_throttled: %llu \n", nr_sampled, nr_dram, nr_nvm, nr_write,
+				nr_throttled);
+			nr_dram = 0;
+			nr_nvm = 0;
+			nr_write = 0;
+		    }
+		    /* read, write barrier */
+		    smp_mb();
+		    WRITE_ONCE(up->data_tail, up->data_tail + ph->size);
+		} while (cond);
 	    }
 	}
-	cond_resched();
+	/* sleep */
+	schedule_timeout_interruptible(sleep_timeout);
+
+	/* check elasped time */
+	cur = jiffies;
+	if ((cur - elapsed_cputime) >= cpucap_period) {
+	    u64 cur_runtime = t->se.sum_exec_runtime;
+	    exec_runtime = cur_runtime - exec_runtime; //ns
+	    elapsed_cputime = jiffies_to_usecs(cur - elapsed_cputime); //us
+	    if (!cputime) {
+		u64 cur_cputime = div64_u64(exec_runtime, elapsed_cputime);
+		// EMA with the scale factor (0.2)
+		cputime = ((cur_cputime << 3) + (cputime << 1)) / 10;
+	    } else
+		cputime = div64_u64(exec_runtime, elapsed_cputime);
+
+	    /* to prevent frequent updates, allow for a slight variation of +/- 0.5% */
+	    if (cputime > (ksampled_soft_cpu_quota + 5) &&
+		    sample_period != pcount) {
+		/* need to increase the sample period */
+		unsigned long period = get_sample_period(sample_period);
+		period *= cputime;
+		period /= ksampled_soft_cpu_quota;
+		period = increase_sample_period(sample_period, period);
+		/* reset */
+		if (period != sample_period) {
+		    sample_period = period;
+		    //pebs_disable();
+		    pebs_update_period(get_sample_period(sample_period));
+		    //pebs_enable();
+		}
+	    } else if (cputime < (ksampled_soft_cpu_quota - 5) && sample_period) {
+		unsigned long period = get_sample_period(sample_period);
+		period *= cputime;
+		period /= ksampled_soft_cpu_quota;
+		period = decrease_sample_period(sample_period, period);
+		/* reset */
+		if (period != sample_period) {
+		    sample_period = period;
+		    //pebs_disable();
+		    pebs_update_period(get_sample_period(sample_period));
+		    //pebs_enable();
+		}
+	    }
+	    /* does it need to prevent ping-pong behavior? */
+	    
+	    elapsed_cputime = cur;
+	    exec_runtime = cur_runtime;
+	}
+
+	/* This is used for reporting the sample period and cputime */
+	if (cur - trace_cputime >= trace_period) {
+	    u64 cur_runtime = t->se.sum_exec_runtime;
+	    trace_runtime = cur_runtime - trace_runtime;
+	    trace_cputime = jiffies_to_usecs(cur - trace_cputime);
+	    trace_cputime = div64_u64(trace_runtime, trace_cputime);
+
+	    trace_printk("sample_period: %llu cputime: %llu\n",
+		    get_sample_period(sample_period), trace_cputime);
+	    
+	    trace_cputime = cur;
+	    trace_runtime = cur_runtime;
+	}
     }
 
-    printk("nr_sampled: %llu, nr_throttled: %llu, nr_unknown: %llu\n", nr_sampled, nr_throttled, nr_unknown);
+    total_runtime = (t->se.sum_exec_runtime) - total_runtime; // ns
+    total_cputime = jiffies_to_usecs(jiffies - total_cputime); // us
+
+    printk("nr_sampled: %llu, nr_throttled: %llu, nr_lost: %llu\n", nr_sampled, nr_throttled, nr_lost);
+    printk("total runtime: %llu ns, total cputime: %llu us, cpu usage: %llu\n",
+	    total_runtime, total_cputime, (total_runtime) / total_cputime);
 
     return 0;
 }

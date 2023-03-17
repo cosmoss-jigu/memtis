@@ -3026,11 +3026,10 @@ unsigned int htmm_inst_sample_period = 10007;
 unsigned int htmm_thres_hot = 2;
 unsigned int htmm_thres_cold = 2000000;
 unsigned int htmm_split_period = 2; /* used to shift the wss of memcg */
-unsigned int htmm_min_cooling_interval = 5000; /* in ms, 5s */
-unsigned int htmm_max_cooling_interval = 1000; /* in ms, 60s */
+unsigned int ksampled_min_sample_ratio = 50; // 50%
+unsigned int ksampled_max_sample_ratio = 10; // 10%
 unsigned int htmm_demotion_period_in_ms = 100;
 unsigned int htmm_promotion_period_in_ms = 100;
-unsigned int htmm_base_spatial_count = 0;
 unsigned int htmm_thres_split = 2; 
 unsigned int htmm_static_thres = 0;
 unsigned int htmm_thres_adjust = 100000;
@@ -3038,6 +3037,7 @@ unsigned int htmm_util_weight = 10;
 unsigned int htmm_mode = 1;
 unsigned int htmm_gamma = 4; /* divide this by 10 */
 bool htmm_cxl_mode = true;
+unsigned int ksampled_soft_cpu_quota = 30;
 #endif
 
 #ifdef CONFIG_SYSFS
@@ -3224,13 +3224,13 @@ static struct kobj_attribute htmm_thres_cold_attr =
 	__ATTR(htmm_thres_cold, 0644, htmm_thres_cold_show,
 	       htmm_thres_cold_store);
 
-static ssize_t htmm_min_cooling_interval_show(struct kobject *kobj,
+static ssize_t ksampled_min_sample_ratio_show(struct kobject *kobj,
 				    struct kobj_attribute *attr, char *buf)
 {
-	return sysfs_emit(buf, "%u\n", htmm_min_cooling_interval);
+	return sysfs_emit(buf, "%u\n", ksampled_min_sample_ratio);
 }
 
-static ssize_t htmm_min_cooling_interval_store(struct kobject *kobj,
+static ssize_t ksampled_min_sample_ratio_store(struct kobject *kobj,
 				     struct kobj_attribute *attr,
 				     const char *buf, size_t count)
 {
@@ -3241,21 +3241,21 @@ static ssize_t htmm_min_cooling_interval_store(struct kobject *kobj,
 	if (err)
 		return err;
 
-	WRITE_ONCE(htmm_min_cooling_interval, interval);
+	WRITE_ONCE(ksampled_min_sample_ratio, interval);
 	return count;
 }
 
-static struct kobj_attribute htmm_min_cooling_interval_attr =
-	__ATTR(htmm_min_cooling_interval, 0644, htmm_min_cooling_interval_show,
-	       htmm_min_cooling_interval_store);
+static struct kobj_attribute ksampled_min_sample_ratio_attr =
+	__ATTR(ksampled_min_sample_ratio, 0644, ksampled_min_sample_ratio_show,
+	       ksampled_min_sample_ratio_store);
 
-static ssize_t htmm_max_cooling_interval_show(struct kobject *kobj,
+static ssize_t ksampled_max_sample_ratio_show(struct kobject *kobj,
 				    struct kobj_attribute *attr, char *buf)
 {
-	return sysfs_emit(buf, "%u\n", htmm_max_cooling_interval);
+	return sysfs_emit(buf, "%u\n", ksampled_max_sample_ratio);
 }
 
-static ssize_t htmm_max_cooling_interval_store(struct kobject *kobj,
+static ssize_t ksampled_max_sample_ratio_store(struct kobject *kobj,
 				     struct kobj_attribute *attr,
 				     const char *buf, size_t count)
 {
@@ -3266,13 +3266,13 @@ static ssize_t htmm_max_cooling_interval_store(struct kobject *kobj,
 	if (err)
 		return err;
 
-	WRITE_ONCE(htmm_max_cooling_interval, interval);
+	WRITE_ONCE(ksampled_max_sample_ratio, interval);
 	return count;
 }
 
-static struct kobj_attribute htmm_max_cooling_interval_attr =
-	__ATTR(htmm_max_cooling_interval, 0644, htmm_max_cooling_interval_show,
-	       htmm_max_cooling_interval_store);
+static struct kobj_attribute ksampled_max_sample_ratio_attr =
+	__ATTR(ksampled_max_sample_ratio, 0644, ksampled_max_sample_ratio_show,
+	       ksampled_max_sample_ratio_store);
 
 static ssize_t htmm_demotion_period_show(struct kobject *kobj,
 				   struct kobj_attribute *attr, char *buf)
@@ -3324,13 +3324,13 @@ static struct kobj_attribute htmm_promotion_period_attr =
 	__ATTR(htmm_promotion_period_in_ms, 0644, htmm_promotion_period_show,
 	       htmm_promotion_period_store);
 
-static ssize_t htmm_base_spatial_count_show(struct kobject *kobj,
+static ssize_t ksampled_soft_cpu_quota_show(struct kobject *kobj,
 				   struct kobj_attribute *attr, char *buf)
 {
-	return sysfs_emit(buf, "%u\n", htmm_base_spatial_count);
+	return sysfs_emit(buf, "%u\n", ksampled_soft_cpu_quota);
 }
 
-static ssize_t htmm_base_spatial_count_store(struct kobject *kobj,
+static ssize_t ksampled_soft_cpu_quota_store(struct kobject *kobj,
 				    struct kobj_attribute *attr,
 				    const char *buf, size_t count)
 {
@@ -3341,13 +3341,13 @@ static ssize_t htmm_base_spatial_count_store(struct kobject *kobj,
 	if (err)
 		return err;
 
-	WRITE_ONCE(htmm_base_spatial_count, sp_count);
+	WRITE_ONCE(ksampled_soft_cpu_quota, sp_count);
 	return count;
 }
 
-static struct kobj_attribute htmm_base_spatial_count_attr =
-	__ATTR(htmm_base_spatial_count, 0644, htmm_base_spatial_count_show,
-	       htmm_base_spatial_count_store);
+static struct kobj_attribute ksampled_soft_cpu_quota_attr =
+	__ATTR(ksampled_soft_cpu_quota, 0644, ksampled_soft_cpu_quota_show,
+	       ksampled_soft_cpu_quota_store);
 
 static ssize_t htmm_thres_split_show(struct kobject *kobj,
 				   struct kobj_attribute *attr, char *buf)
@@ -3549,11 +3549,11 @@ static struct attribute *htmm_attrs[] = {
 	&htmm_split_period_attr.attr,
 	&htmm_thres_hot_attr.attr,
 	&htmm_thres_cold_attr.attr,
-	&htmm_min_cooling_interval_attr.attr,
-	&htmm_max_cooling_interval_attr.attr,
+	&ksampled_min_sample_ratio_attr.attr,
+	&ksampled_max_sample_ratio_attr.attr,
 	&htmm_demotion_period_attr.attr,
 	&htmm_promotion_period_attr.attr,
-	&htmm_base_spatial_count_attr.attr,
+	&ksampled_soft_cpu_quota_attr.attr,
 	&htmm_thres_split_attr.attr,
 	&htmm_static_thres_attr.attr,
 	&htmm_thres_adjust_attr.attr,

@@ -1185,6 +1185,9 @@ static void reset_memcg_stat(struct mem_cgroup *memcg)
 	memcg->ebp_hotness_hg[i] = 0;
     }
 
+    for (i = 0; i < 21; i++)
+	memcg->access_map[i] = 0;
+
     memcg->sum_util = 0;
     memcg->num_util = 0;
 }
@@ -1268,6 +1271,7 @@ static void __adjust_active_threshold(struct mm_struct *mm,
 	    /* reset stat for split */
 	    memcg->nr_sampled_for_split = 0;
 	    memcg->need_split = false;
+	    //trace_printk("memcg->nr_split: %lu, memcg->split_thres: %lu\n", memcg->nr_split, memcg->split_threshold);
 	}
     }
     else { /* normal case */

@@ -552,7 +552,7 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
     bool shrink_active = false;
     int target_nid = htmm_cxl_mode ? 1 : next_demotion_node(pgdat->node_id);
 
-    nr_to_reclaim = htmm_max_cooling_interval * 256; // mb to pages
+    nr_to_reclaim = MAX_MIGRATION_RATE_IN_MBPS * 256; // mb to pages
     nr_to_reclaim *= htmm_demotion_period_in_ms;
     nr_to_reclaim /= 1000; // max num. of demotable pages in this period.
 
