@@ -305,6 +305,10 @@ static int ksamplingd(void *data)
 		} while (cond);
 	    }
 	}
+	/* if ksampled_soft_cpu_quota is zero, disable dynamic pebs feature */
+	if (!ksampled_soft_cpu_quota)
+	    continue;
+
 	/* sleep */
 	schedule_timeout_interruptible(sleep_timeout);
 

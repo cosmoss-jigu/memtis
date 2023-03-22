@@ -4,7 +4,7 @@
 
 #define BUFFER_SIZE	128 /* 1MB */
 #define CPUS_PER_SOCKET 20
-#define MAX_MIGRATION_RATE_IN_MBPS  1024 /* 1024MB per sec */
+#define MAX_MIGRATION_RATE_IN_MBPS  2048 /* 2048MB per sec */
 
 
 /* pebs events */
