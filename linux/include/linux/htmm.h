@@ -31,7 +31,7 @@
 #define MULTIPLIER  4
 
 #define pcount 30
-/* onle prime numbers */
+/* only prime numbers */
 static const unsigned int pebs_period_list[pcount] = {
     199,    // 200 - min
     293,    // 300
@@ -63,6 +63,16 @@ static const unsigned int pebs_period_list[pcount] = {
     16001,  // 16000
     17989,  // 18000
     19997,  // 20000 - max
+};
+
+#define pinstcount 5
+/* this is for store instructions */
+static const unsigned int pebs_inst_period_list[pinstcount] ={
+    100003, // 0.1M
+    300007, // 0.3M
+    600011, // 0.6M
+    1000003,// 1.0M
+    1500003,// 1.5M
 };
 
 struct htmm_event {
@@ -152,7 +162,7 @@ extern void *huge_region_insert(struct mm_struct *mm, unsigned long addr,
 extern int ksamplingd_init(pid_t pid, int node);
 extern void ksamplingd_exit(void);
 
-static inline unsigned long get_sample_period(unsigned cur) {
+static inline unsigned long get_sample_period(unsigned long cur) {
     if (cur < 0)
 	return 0;
     else if (cur < pcount)
@@ -161,6 +171,39 @@ static inline unsigned long get_sample_period(unsigned cur) {
 	return pebs_period_list[pcount - 1];
 }
 
+static inline unsigned long get_sample_inst_period(unsigned long cur) {
+    if (cur < 0)
+	return 0;
+    else if (cur < pinstcount)
+	return pebs_inst_period_list[cur];
+    else
+	return pebs_inst_period_list[pinstcount - 1];
+}
+#if 1
+static inline void increase_sample_period(unsigned long *llc_period,
+					  unsigned long *inst_period) {
+    unsigned long p;
+    p = *llc_period;
+    if (++p < pcount)
+	*llc_period = p;
+    
+    p = *inst_period;
+    if (++p < pinstcount)
+	*inst_period = p;
+}
+
+static inline void decrease_sample_period(unsigned long *llc_period,
+					  unsigned long *inst_period) {
+    unsigned long p;
+    p = *llc_period;
+    if (p > 0)
+	*llc_period = p--;
+    
+    p = *inst_period;
+    if (p > 0)
+	*inst_period = p--;
+}
+#else
 static inline unsigned int increase_sample_period(unsigned int cur,
 						  unsigned int next) {
     do {
@@ -178,6 +221,8 @@ static inline unsigned int decrease_sample_period(unsigned int cur,
     
     return cur;
 }
+#endif
+
 
 /* htmm_migrater.c */
 #define HTMM_MIN_FREE_PAGES 256 * 10 // 10MB

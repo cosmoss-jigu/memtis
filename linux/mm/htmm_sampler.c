@@ -146,7 +146,7 @@ static void pebs_enable(void)
     }
 }
 
-static void pebs_update_period(uint64_t value)
+static void pebs_update_period(uint64_t value, uint64_t inst_value)
 {
     int cpu, event;
 
@@ -161,6 +161,9 @@ static void pebs_update_period(uint64_t value)
 		case NVMREAD:
 		case CXLREAD:
 		    ret = perf_event_period(mem_event[cpu][event], value);
+		    break;
+		case MEMWRITE:
+		    ret = perf_event_period(mem_event[cpu][event], inst_value);
 		    break;
 		default:
 		    ret = 0;
@@ -187,6 +190,7 @@ static int ksamplingd(void *data)
     /* used for periodic checks*/
     unsigned long cpucap_period = msecs_to_jiffies(15000); // 15s
     unsigned long sample_period = 0;
+    unsigned long sample_inst_period = 0;
     /* report cpu/period stat */
     unsigned long trace_cputime, trace_period = msecs_to_jiffies(3000); // 3s
     unsigned long trace_runtime;
@@ -329,6 +333,13 @@ static int ksamplingd(void *data)
 	    if (cputime > (ksampled_soft_cpu_quota + 5) &&
 		    sample_period != pcount) {
 		/* need to increase the sample period */
+#if 1 /* only increase by 1 */
+		unsigned long tmp1 = sample_period, tmp2 = sample_inst_period;
+		increase_sample_period(&sample_period, &sample_inst_period);
+		if (tmp1 != sample_period || tmp2 != sample_inst_period)
+		    pebs_update_period(get_sample_period(sample_period),
+				       get_sample_inst_period(sample_inst_period));
+#else
 		unsigned long period = get_sample_period(sample_period);
 		period *= cputime;
 		period /= ksampled_soft_cpu_quota;
@@ -340,7 +351,15 @@ static int ksamplingd(void *data)
 		    pebs_update_period(get_sample_period(sample_period));
 		    //pebs_enable();
 		}
+#endif
 	    } else if (cputime < (ksampled_soft_cpu_quota - 5) && sample_period) {
+#if 1
+		unsigned long tmp1 = sample_period, tmp2 = sample_inst_period;
+		decrease_sample_period(&sample_period, &sample_inst_period);
+		if (tmp1 != sample_period || tmp2 != sample_inst_period)
+		    pebs_update_period(get_sample_period(sample_period),
+				    get_sample_inst_period(sample_inst_period));
+#else
 		unsigned long period = get_sample_period(sample_period);
 		period *= cputime;
 		period /= ksampled_soft_cpu_quota;
@@ -352,6 +371,7 @@ static int ksamplingd(void *data)
 		    pebs_update_period(get_sample_period(sample_period));
 		    //pebs_enable();
 		}
+#endif
 	    }
 	    /* does it need to prevent ping-pong behavior? */
 	    
