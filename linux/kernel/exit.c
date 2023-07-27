@@ -443,18 +443,6 @@ static void exit_mm(void)
 	if (!mm)
 		return;
 	sync_mm_rss(mm);
-#ifdef CONFIG_HTMM
-	{
-	    huge_region_t *node;
-	    unsigned long idx;
-	    xa_for_each(&mm->root_huge_region_map, idx, node) {
-		if (!node) {
-		    xa_erase(&mm->root_huge_region_map, idx);
-		    huge_region_free(node);
-		}
-	    }
-	}
-#endif
 	/*
 	 * Serialize with any possible pending coredump.
 	 * We must hold mmap_lock around checking core_state

@@ -190,18 +190,20 @@ extern unsigned int htmm_sample_period;
 extern unsigned int htmm_inst_sample_period;
 extern unsigned int htmm_split_period;
 extern unsigned int htmm_thres_hot;
-extern unsigned int htmm_thres_cold;
+extern unsigned int htmm_cooling_period;
+extern unsigned int htmm_adaptation_period;
 extern unsigned int ksampled_min_sample_ratio;
 extern unsigned int ksampled_max_sample_ratio;
 extern unsigned int htmm_demotion_period_in_ms;
 extern unsigned int htmm_promotion_period_in_ms;
 extern unsigned int htmm_thres_split;
 extern unsigned int htmm_static_thres;
-extern unsigned int htmm_thres_adjust;
 extern unsigned int htmm_util_weight;
 extern unsigned int htmm_gamma;
 extern unsigned int htmm_mode;
 extern bool htmm_cxl_mode;
+extern bool htmm_skip_cooling;
+extern unsigned int htmm_thres_cooling_alloc;
 extern unsigned int ksampled_soft_cpu_quota;
 #endif
 static inline bool mpol_is_preferred_many(struct mempolicy *pol)

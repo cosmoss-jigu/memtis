@@ -669,6 +669,12 @@ static vm_fault_t __do_huge_pmd_anonymous_page(struct vm_fault *vmf,
 		spin_unlock(vmf->ptl);
 		count_vm_event(THP_FAULT_ALLOC);
 		count_memcg_event_mm(vma->vm_mm, THP_FAULT_ALLOC);
+#ifdef CONFIG_HTMM
+		if (page != NULL && node_is_toptier(page_to_nid(page)))
+		    count_vm_events(HTMM_ALLOC_DRAM, HPAGE_PMD_NR);
+		else
+		    count_vm_events(HTMM_ALLOC_NVM, HPAGE_PMD_NR);
+#endif
 	}
 
 	return 0;

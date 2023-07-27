@@ -1151,13 +1151,14 @@ int __ref online_pages(unsigned long pfn, unsigned long nr_pages,
 
 	kswapd_run(nid);
 	kcompactd_run(nid);
-#ifdef CONFIG_HTMM /* online_pages() */
-	mem_cgroup_per_node_htmm_init();
-#endif
 	writeback_set_ratelimit();
 
 	memory_notify(MEM_ONLINE, &arg);
 	mem_hotplug_done();
+#ifdef CONFIG_HTMM /* online_pages() */
+	mem_cgroup_per_node_htmm_init();
+#endif
+
 	return 0;
 
 failed_addition:

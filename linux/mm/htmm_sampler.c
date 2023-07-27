@@ -192,10 +192,13 @@ static int ksamplingd(void *data)
     unsigned long sample_period = 0;
     unsigned long sample_inst_period = 0;
     /* report cpu/period stat */
-    unsigned long trace_cputime, trace_period = msecs_to_jiffies(3000); // 3s
+    unsigned long trace_cputime, trace_period = msecs_to_jiffies(1500); // 3s
     unsigned long trace_runtime;
     /* for timeout */ 
-    unsigned long tmp, sleep_timeout;
+    unsigned long sleep_timeout;
+
+    /* for analytic purpose */
+    unsigned long hr_dram = 0, hr_nvm = 0;
 
     /* orig impl: see read_sum_exec_runtime() */
     trace_runtime = total_runtime = exec_runtime = t->se.sum_exec_runtime;
@@ -278,10 +281,14 @@ static int ksamplingd(void *data)
 			    //count_vm_event(HTMM_NR_SAMPLED);
 			    nr_sampled++;
 
-			    if (event == DRAMREAD)
+			    if (event == DRAMREAD) {
 				nr_dram++;
-			    else if (event == CXLREAD || event == NVMREAD)
+				hr_dram++;
+			    }
+			    else if (event == CXLREAD || event == NVMREAD) {
 				nr_nvm++;
+				hr_nvm++;
+			    }
 			    else
 				nr_write++;
 			    break;
@@ -297,7 +304,7 @@ static int ksamplingd(void *data)
 			    break;
 		    }
 		    if (nr_sampled % 500000 == 0) {
-			printk("nr_sampled: %llu, nr_dram: %llu, nr_nvm: %llu, nr_write: %llu, nr_throttled: %llu \n", nr_sampled, nr_dram, nr_nvm, nr_write,
+			trace_printk("nr_sampled: %llu, nr_dram: %llu, nr_nvm: %llu, nr_write: %llu, nr_throttled: %llu \n", nr_sampled, nr_dram, nr_nvm, nr_write,
 				nr_throttled);
 			nr_dram = 0;
 			nr_nvm = 0;
@@ -333,45 +340,18 @@ static int ksamplingd(void *data)
 	    if (cputime > (ksampled_soft_cpu_quota + 5) &&
 		    sample_period != pcount) {
 		/* need to increase the sample period */
-#if 1 /* only increase by 1 */
+		/* only increase by 1 */
 		unsigned long tmp1 = sample_period, tmp2 = sample_inst_period;
 		increase_sample_period(&sample_period, &sample_inst_period);
 		if (tmp1 != sample_period || tmp2 != sample_inst_period)
 		    pebs_update_period(get_sample_period(sample_period),
 				       get_sample_inst_period(sample_inst_period));
-#else
-		unsigned long period = get_sample_period(sample_period);
-		period *= cputime;
-		period /= ksampled_soft_cpu_quota;
-		period = increase_sample_period(sample_period, period);
-		/* reset */
-		if (period != sample_period) {
-		    sample_period = period;
-		    //pebs_disable();
-		    pebs_update_period(get_sample_period(sample_period));
-		    //pebs_enable();
-		}
-#endif
 	    } else if (cputime < (ksampled_soft_cpu_quota - 5) && sample_period) {
-#if 1
 		unsigned long tmp1 = sample_period, tmp2 = sample_inst_period;
 		decrease_sample_period(&sample_period, &sample_inst_period);
 		if (tmp1 != sample_period || tmp2 != sample_inst_period)
 		    pebs_update_period(get_sample_period(sample_period),
 				    get_sample_inst_period(sample_inst_period));
-#else
-		unsigned long period = get_sample_period(sample_period);
-		period *= cputime;
-		period /= ksampled_soft_cpu_quota;
-		period = decrease_sample_period(sample_period, period);
-		/* reset */
-		if (period != sample_period) {
-		    sample_period = period;
-		    //pebs_disable();
-		    pebs_update_period(get_sample_period(sample_period));
-		    //pebs_enable();
-		}
-#endif
 	    }
 	    /* does it need to prevent ping-pong behavior? */
 	    
@@ -381,14 +361,20 @@ static int ksamplingd(void *data)
 
 	/* This is used for reporting the sample period and cputime */
 	if (cur - trace_cputime >= trace_period) {
+	    unsigned long hr = 0;
 	    u64 cur_runtime = t->se.sum_exec_runtime;
 	    trace_runtime = cur_runtime - trace_runtime;
 	    trace_cputime = jiffies_to_usecs(cur - trace_cputime);
 	    trace_cputime = div64_u64(trace_runtime, trace_cputime);
-
-	    trace_printk("sample_period: %llu cputime: %llu\n",
-		    get_sample_period(sample_period), trace_cputime);
 	    
+	    if (hr_dram + hr_nvm == 0)
+		hr = 0;
+	    else
+		hr = hr_dram * 10000 / (hr_dram + hr_nvm);
+	    trace_printk("sample_period: %lu || cputime: %lu  || hit ratio: %lu\n",
+		    get_sample_period(sample_period), trace_cputime, hr);
+	    
+	    hr_dram = hr_nvm = 0;
 	    trace_cputime = cur;
 	    trace_runtime = cur_runtime;
 	}
@@ -398,7 +384,7 @@ static int ksamplingd(void *data)
     total_cputime = jiffies_to_usecs(jiffies - total_cputime); // us
 
     printk("nr_sampled: %llu, nr_throttled: %llu, nr_lost: %llu\n", nr_sampled, nr_throttled, nr_lost);
-    printk("total runtime: %llu ns, total cputime: %llu us, cpu usage: %llu\n",
+    printk("total runtime: %llu ns, total cputime: %lu us, cpu usage: %llu\n",
 	    total_runtime, total_cputime, (total_runtime) / total_cputime);
 
     return 0;

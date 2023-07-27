@@ -2,7 +2,7 @@
 
 #define DEFERRED_SPLIT_ISOLATED 1
 
-#define BUFFER_SIZE	128 /* 1MB */
+#define BUFFER_SIZE	32 /* 128: 1MB */
 #define CPUS_PER_SOCKET 20
 #define MAX_MIGRATION_RATE_IN_MBPS  2048 /* 2048MB per sec */
 
@@ -27,8 +27,6 @@
 #define NVM_ACCESS_LATENCY  270
 #define CXL_ACCESS_LATENCY  170
 #define DELTA_CYCLES	(NVM_ACCESS_LATENCY - DRAM_ACCESS_LATENCY)
-
-#define MULTIPLIER  4
 
 #define pcount 30
 /* only prime numbers */
@@ -92,20 +90,10 @@ enum events {
     N_HTMMEVENTS
 };
 
-typedef struct huge_region {
-    struct vm_area_struct *vma;
-    struct list_head hr_entry;
-    spinlock_t lock;
-    unsigned long haddr;
-    unsigned int hot_utils;
-    unsigned int total_accesses;
-    unsigned int cooling_clock;
-} huge_region_t;
-
 /* htmm_core.c */
 extern void htmm_mm_init(struct mm_struct *mm);
 extern void htmm_mm_exit(struct mm_struct *mm);
-extern void __prep_transhuge_page_for_htmm(struct page *page);
+extern void __prep_transhuge_page_for_htmm(struct mm_struct *mm, struct page *page);
 extern void prep_transhuge_page_for_htmm(struct vm_area_struct *vma,
 					 struct page *page);
 extern void clear_transhuge_pginfo(struct page *page);
@@ -115,12 +103,11 @@ extern pginfo_t *get_compound_pginfo(struct page *page, unsigned long address);
 
 extern void check_transhuge_cooling(void *arg, struct page *page, bool locked);
 extern void check_base_cooling(pginfo_t *pginfo, struct page *page, bool locked);
-extern void set_page_coolstatus(struct page *page, pte_t *pte, struct mm_struct *mm);
+extern int set_page_coolstatus(struct page *page, pte_t *pte, struct mm_struct *mm);
 
 extern void set_lru_adjusting(struct mem_cgroup *memcg, bool inc_thres);
 
 extern void update_pginfo(pid_t pid, unsigned long address, enum events e);
-extern bool region_for_toptier(huge_region_t *region);
 
 extern bool deferred_split_huge_page_for_htmm(struct page *page);
 extern unsigned long deferred_split_scan_for_htmm(struct mem_cgroup_per_node *pn,
@@ -137,9 +124,7 @@ extern void move_page_to_inactive_lru(struct page *page);
 extern struct page *get_meta_page(struct page *page);
 extern unsigned int get_accesses_from_idx(unsigned int idx);
 extern unsigned int get_idx(unsigned long num);
-extern int get_base_idx(unsigned int num);
 extern int get_skew_idx(unsigned long num);
-extern unsigned int get_weight(uint8_t history);
 extern void uncharge_htmm_pte(pte_t *pte, struct mem_cgroup *memcg);
 extern void uncharge_htmm_page(struct page *page, struct mem_cgroup *memcg);
 extern void charge_htmm_page(struct page *page, struct mem_cgroup *memcg);
@@ -148,15 +133,6 @@ extern void charge_htmm_page(struct page *page, struct mem_cgroup *memcg);
 extern void set_lru_split_pid(pid_t pid);
 extern void adjust_active_threshold(pid_t pid);
 extern void set_lru_cooling_pid(pid_t pid);
-
-extern struct kmem_cache *huge_region_cachep;
-
-extern huge_region_t *huge_region_alloc(void);
-extern void huge_region_free(huge_region_t *node);
-extern void *huge_region_lookup(struct mm_struct *mm, unsigned long addr);
-extern void *huge_region_delete(struct mm_struct *mm, unsigned long addr);
-extern void *huge_region_insert(struct mm_struct *mm, unsigned long addr,
-				huge_region_t *node);
 
 /* htmm_sampler.c */
 extern int ksamplingd_init(pid_t pid, int node);
@@ -197,11 +173,11 @@ static inline void decrease_sample_period(unsigned long *llc_period,
     unsigned long p;
     p = *llc_period;
     if (p > 0)
-	*llc_period = p--;
+	*llc_period = p - 1;
     
     p = *inst_period;
     if (p > 0)
-	*inst_period = p--;
+	*inst_period = p - 1;
 }
 #else
 static inline unsigned int increase_sample_period(unsigned int cur,
@@ -229,5 +205,8 @@ static inline unsigned int decrease_sample_period(unsigned int cur,
 extern unsigned long get_nr_lru_pages_node(struct mem_cgroup *memcg, pg_data_t *pgdat);
 extern void add_memcg_to_kmigraterd(struct mem_cgroup *memcg, int nid);
 extern void del_memcg_from_kmigraterd(struct mem_cgroup *memcg, int nid);
+extern unsigned long get_memcg_demotion_watermark(unsigned long max_nr_pages);
+extern unsigned long get_memcg_promotion_watermark(unsigned long max_nr_pages);
+extern void kmigraterd_wakeup(int nid);
 extern int kmigraterd_init(void);
-
+extern void kmigraterd_stop(void);

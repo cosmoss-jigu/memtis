@@ -932,7 +932,6 @@ static bool cooling_page_one(struct page *page, struct vm_area_struct *vma,
 	if (pvmw.pte) {
 	    struct page *pte_page;
 	    unsigned long prev_accessed, cur_idx;
-	    unsigned long haddr = address & HPAGE_PMD_MASK;
 	    unsigned int memcg_cclock;
 	    pte_t *pte = pvmw.pte;
 
@@ -971,48 +970,6 @@ static bool cooling_page_one(struct page *page, struct vm_area_struct *vma,
 		
 	    }
 	    spin_unlock(&hca->memcg->access_lock);
-#if 0
-	    if (transhuge_vma_suitable(pvmw.vma, haddr)) {
-		huge_region_t *node;
-		struct mm_struct *mm = pvmw.vma->vm_mm;
-
-		node = huge_region_lookup(mm, haddr);
-		if (!node) {
-		    node = huge_region_alloc();
-		    if (!node)
-			continue;
-
-		    node->vma = pvmw.vma;
-		    node->haddr = haddr;
-		    node->cooling_clock = memcg_cclock;
-		    huge_region_insert(mm, haddr, node);
-		    
-		    spin_lock(&mm->hri.lock);
-		} else {
-		    spin_lock(&mm->hri.lock);
-		    if (list_empty(&node->hr_entry)) {
-			spin_unlock(&mm->hri.lock);
-			continue;
-		    }
-		    list_del(&node->hr_entry);
-		}
-		
-		if (node->cooling_clock != memcg_cclock) {
-		    node->hot_utils = 0;
-		    node->cooling_clock = memcg_cclock;
-		}
-		
-		if (hca->page_is_hot == 2)
-		    node->hot_utils++;
-		
-		if (node->hot_utils >= (HPAGE_PMD_NR * 95 / 100))
-		    list_add(&node->hr_entry, &mm->hri.region_list[HUGE_TOPTIER]);
-		else
-		    list_add(&node->hr_entry, &mm->hri.region_list[BASE_PAGES]);
-
-		spin_unlock(&mm->hri.lock);
-	    }
-#endif
 	} else if (pvmw.pmd) {
 	    /* do nothing */
 	    continue;
@@ -1067,7 +1024,6 @@ static bool page_check_hotness_one(struct page *page, struct vm_area_struct *vma
 	if (pvmw.pte) {
 	    struct page *pte_page;
 	    unsigned long cur_idx;
-	    bool cooling_status;
 	    pte_t *pte = pvmw.pte;
 
 	    pte_page = virt_to_page((unsigned long)pte);
@@ -1132,7 +1088,6 @@ static bool get_pginfo_idx_one(struct page *page, struct vm_area_struct *vma,
 	if (pvmw.pte) {
 	    struct page *pte_page;
 	    unsigned long cur_idx;
-	    bool cooling_status;
 	    pte_t *pte = pvmw.pte;
 
 	    pte_page = virt_to_page((unsigned long)pte);

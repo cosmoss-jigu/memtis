@@ -18,9 +18,6 @@
 #include <linux/spinlock.h>
 #include <linux/types.h>
 
-#ifdef CONFIG_HTMM
-#include <linux/mm_types.h>
-#endif
 /*
  * The bottom two bits of the entry determine how the XArray interprets
  * the contents:
@@ -294,14 +291,12 @@ enum xa_lock_type {
  * entry.  If any other entry in the array is non-NULL, @xa_head points
  * to an @xa_node.
  */
-#ifndef CONFIG_HTMM
 struct xarray {
 	spinlock_t	xa_lock;
 /* private: The rest of the data structure is not to be used directly. */
 	gfp_t		xa_flags;
 	void __rcu *	xa_head;
 };
-#endif
 
 #define XARRAY_INIT(name, flags) {				\
 	.xa_lock = __SPIN_LOCK_UNLOCKED(name.xa_lock),		\

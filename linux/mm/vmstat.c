@@ -1368,6 +1368,8 @@ const char * const vmstat_text[] = {
 	"htmm_missed_dramread",
 	"htmm_missed_nvmread",
 	"htmm_missed_write",
+	"htmm_alloc_dram",
+	"htmm_alloc_nvm",
 #endif
 #endif /* CONFIG_MEMORY_BALLOON */
 #ifdef CONFIG_DEBUG_TLBFLUSH

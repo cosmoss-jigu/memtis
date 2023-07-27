@@ -5243,9 +5243,9 @@ static struct mem_cgroup *mem_cgroup_alloc(void)
 	memcg->max_dram_sampled = 0;
 	memcg->prev_max_dram_sampled = 0;
 	/* thresholds */
-	memcg->active_threshold = 1;
-	memcg->warm_threshold = 0;
-	memcg->bp_active_threshold = 1;
+	memcg->active_threshold = htmm_thres_hot;
+	memcg->warm_threshold = htmm_thres_hot;
+	memcg->bp_active_threshold = htmm_thres_hot;
 
 	/* split */
 	memcg->split_threshold = 21;
@@ -5267,6 +5267,7 @@ static struct mem_cgroup *mem_cgroup_alloc(void)
 	memcg->split_happen = false;
 	memcg->need_split = false;
 	memcg->cooling_clock = 0;
+	memcg->nr_alloc = 0;
 #endif
 	idr_replace(&mem_cgroup_idr, memcg, memcg->id.id);
 	return memcg;
@@ -7596,6 +7597,8 @@ static ssize_t memcg_htmm_write(struct kernfs_open_file *of,
 
     if (memcg->htmm_enabled) {
 	kmigraterd_init();
+    } else {
+	kmigraterd_stop();
     }
     for_each_node_state(nid, N_MEMORY) {
 	struct pglist_data *pgdat = NODE_DATA(nid);
@@ -7768,6 +7771,9 @@ static int pgdat_memcg_htmm_init(struct pglist_data *pgdat)
 	printk("error: fails to allocate pgdat->memcg_htmm_file\n");
 	return -ENOMEM;
     }
+#ifdef CONFIG_LOCKDEP
+    lockdep_register_key(&(pgdat->memcg_htmm_file->lockdep_key));
+#endif
     return 0;
 }
 

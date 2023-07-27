@@ -325,7 +325,6 @@ static bool remove_migration_pte(struct page *page, struct vm_area_struct *vma,
 
 			struct mem_cgroup *memcg = page_memcg(pvmw.page);
 			struct page *pte_page;
-			spinlock_t *ptl;
 			pginfo_t *pginfo;
 
 			if (!memcg || !memcg->htmm_enabled)

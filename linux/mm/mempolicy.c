@@ -2110,7 +2110,7 @@ struct page *alloc_pages_vma(gfp_t gfp, int order, struct vm_area_struct *vma,
 	    struct mem_cgroup *memcg = mem_cgroup_from_task(p);
 	    unsigned long max_nr_pages;
 	    int nid = pol->mode == MPOL_PREFERRED ? first_node(pol->nodes) : node;
-	    int orig_nid;
+	    int orig_nid = nid;
 	    unsigned int nr_pages = 1U << order;
 	    pg_data_t *pgdat = NODE_DATA(nid);
 	    
@@ -2134,10 +2134,17 @@ struct page *alloc_pages_vma(gfp_t gfp, int order, struct vm_area_struct *vma,
 		pgdat = NODE_DATA(nid);
 	    }
 
-	    if (orig_nid != nid)
+	    //nid = orig_nid;
+
+	    if (orig_nid != nid) {
 		WRITE_ONCE(memcg->nodeinfo[orig_nid]->need_demotion, true);
-	    else if (max_nr_pages <= (get_nr_lru_pages_node(memcg, pgdat) + 5 * HTMM_MIN_FREE_PAGES))
+		kmigraterd_wakeup(orig_nid);
+	    }
+	    else if (max_nr_pages <= (get_nr_lru_pages_node(memcg, pgdat) +
+			get_memcg_demotion_watermark(max_nr_pages))) {
 		WRITE_ONCE(memcg->nodeinfo[nid]->need_demotion, true);
+		kmigraterd_wakeup(nid);
+	    }
 	    
 	    mpol_cond_put(pol);
 	    page = __alloc_pages_node(nid, gfp | __GFP_THISNODE, order);
@@ -3021,23 +3028,25 @@ void mpol_to_str(char *buffer, int maxlen, struct mempolicy *pol)
 
 bool numa_demotion_enabled = false;
 #ifdef CONFIG_HTMM /* sysfs htmm */
-unsigned int htmm_sample_period = 401;
-unsigned int htmm_inst_sample_period = 10007;
-unsigned int htmm_thres_hot = 2;
-unsigned int htmm_thres_cold = 2000000;
+unsigned int htmm_sample_period = 199;
+unsigned int htmm_inst_sample_period = 100007;
+unsigned int htmm_thres_hot = 1;
+unsigned int htmm_cooling_period = 2000000;
+unsigned int htmm_adaptation_period = 100000;
 unsigned int htmm_split_period = 2; /* used to shift the wss of memcg */
 unsigned int ksampled_min_sample_ratio = 50; // 50%
 unsigned int ksampled_max_sample_ratio = 10; // 10%
-unsigned int htmm_demotion_period_in_ms = 100;
-unsigned int htmm_promotion_period_in_ms = 100;
+unsigned int htmm_demotion_period_in_ms = 500;
+unsigned int htmm_promotion_period_in_ms = 500;
 unsigned int htmm_thres_split = 2; 
 unsigned int htmm_static_thres = 0;
-unsigned int htmm_thres_adjust = 100000;
-unsigned int htmm_util_weight = 10;
+unsigned int htmm_util_weight = 10; // no impact (unused)
 unsigned int htmm_mode = 1;
-unsigned int htmm_gamma = 4; /* divide this by 10 */
-bool htmm_cxl_mode = true;
-unsigned int ksampled_soft_cpu_quota = 30;
+unsigned int htmm_gamma = 4; /* 0.4; divide this by 10 */
+bool htmm_cxl_mode = false;
+bool htmm_skip_cooling = true;
+unsigned int htmm_thres_cooling_alloc = 256 * 1024 * 10; // unit: 4KiB, default: 10GB
+unsigned int ksampled_soft_cpu_quota = 30; // 3 %
 #endif
 
 #ifdef CONFIG_SYSFS
@@ -3199,30 +3208,30 @@ static struct kobj_attribute htmm_thres_hot_attr =
 	__ATTR(htmm_thres_hot, 0644, htmm_thres_hot_show,
 	       htmm_thres_hot_store);
 
-static ssize_t htmm_thres_cold_show(struct kobject *kobj,
+static ssize_t htmm_cooling_period_show(struct kobject *kobj,
 				    struct kobj_attribute *attr, char *buf)
 {
-	return sysfs_emit(buf, "%u\n", htmm_thres_cold);
+	return sysfs_emit(buf, "%u\n", htmm_cooling_period);
 }
 
-static ssize_t htmm_thres_cold_store(struct kobject *kobj,
+static ssize_t htmm_cooling_period_store(struct kobject *kobj,
 				     struct kobj_attribute *attr,
 				     const char *buf, size_t count)
 {
 	int err;
-	unsigned int thres;
+	unsigned int period;
 
-	err = kstrtouint(buf, 10, &thres);
+	err = kstrtouint(buf, 10, &period);
 	if (err)
 		return err;
 
-	WRITE_ONCE(htmm_thres_cold, thres);
+	WRITE_ONCE(htmm_cooling_period, period);
 	return count;
 }
 
-static struct kobj_attribute htmm_thres_cold_attr =
-	__ATTR(htmm_thres_cold, 0644, htmm_thres_cold_show,
-	       htmm_thres_cold_store);
+static struct kobj_attribute htmm_cooling_period_attr =
+	__ATTR(htmm_cooling_period, 0644, htmm_cooling_period_show,
+	       htmm_cooling_period_store);
 
 static ssize_t ksampled_min_sample_ratio_show(struct kobject *kobj,
 				    struct kobj_attribute *attr, char *buf)
@@ -3399,30 +3408,30 @@ static struct kobj_attribute htmm_static_thres_attr =
 	__ATTR(htmm_static_thres, 0644, htmm_static_thres_show,
 	       htmm_static_thres_store);
 
-static ssize_t htmm_thres_adjust_show(struct kobject *kobj,
+static ssize_t htmm_adaptation_period_show(struct kobject *kobj,
 				   struct kobj_attribute *attr, char *buf)
 {
-	return sysfs_emit(buf, "%u\n", htmm_thres_adjust);
+	return sysfs_emit(buf, "%u\n", htmm_adaptation_period);
 }
 
-static ssize_t htmm_thres_adjust_store(struct kobject *kobj,
+static ssize_t htmm_adaptation_period_store(struct kobject *kobj,
 				    struct kobj_attribute *attr,
 				    const char *buf, size_t count)
 {
 	int err;
-	unsigned int thres;
+	unsigned int period;
 
-	err = kstrtouint(buf, 10, &thres);
+	err = kstrtouint(buf, 10, &period);
 	if (err)
 		return err;
 
-	WRITE_ONCE(htmm_thres_adjust, thres);
+	WRITE_ONCE(htmm_adaptation_period, period);
 	return count;
 }
 
-static struct kobj_attribute htmm_thres_adjust_attr =
-	__ATTR(htmm_thres_adjust, 0644, htmm_thres_adjust_show,
-	       htmm_thres_adjust_store);
+static struct kobj_attribute htmm_adaptation_period_attr =
+	__ATTR(htmm_adaptation_period, 0644, htmm_adaptation_period_show,
+	       htmm_adaptation_period_store);
 
 static ssize_t htmm_util_weight_show(struct kobject *kobj,
 				   struct kobj_attribute *attr, char *buf)
@@ -3542,13 +3551,68 @@ static ssize_t htmm_mode_store(struct kobject *kobj,
 static struct kobj_attribute htmm_mode_attr =
 	__ATTR(htmm_mode, 0644, htmm_mode_show,
 	       htmm_mode_store);
+/* sysfs related to newly allocated pages */
+static ssize_t htmm_skip_cooling_show(struct kobject *kobj,
+	struct kobj_attribute *attr, char *buf)
+{
+	if (htmm_skip_cooling)
+	    return sysfs_emit(buf, "[enabled] disabled\n");
+	else
+	    return sysfs_emit(buf, "enabled [disabled]\n");
+}
+
+static ssize_t htmm_skip_cooling_store(struct kobject *kobj,
+	struct kobj_attribute *attr,
+	const char *buf, size_t count)
+{
+    if (sysfs_streq(buf, "enabled"))
+	htmm_skip_cooling = true;
+    else if (sysfs_streq(buf, "disabled"))
+	htmm_skip_cooling= false;
+    else
+	return -EINVAL;
+
+    return count;
+}
+
+static struct kobj_attribute htmm_skip_cooling_attr =
+	__ATTR(htmm_skip_cooling, 0644, htmm_skip_cooling_show,
+	       htmm_skip_cooling_store);
+
+static ssize_t htmm_thres_cooling_alloc_show(struct kobject *kobj,
+	struct kobj_attribute *attr, char *buf)
+{
+        return sysfs_emit(buf, "%u\n", htmm_thres_cooling_alloc);
+}
+
+static ssize_t htmm_thres_cooling_alloc_store(struct kobject *kobj,
+	struct kobj_attribute *attr,
+	const char *buf, size_t count)
+{
+	int err;
+	unsigned int thres;
+
+	err = kstrtouint(buf, 10, &thres);
+	if (err)
+		return err;
+
+	WRITE_ONCE(htmm_thres_cooling_alloc, thres);
+	return count;
+}
+
+static struct kobj_attribute htmm_thres_cooling_alloc_attr =
+	__ATTR(htmm_thres_cooling_alloc, 0644, htmm_thres_cooling_alloc_show,
+	       htmm_thres_cooling_alloc_store);
+
+
 
 static struct attribute *htmm_attrs[] = {
 	&htmm_sample_period_attr.attr,
 	&htmm_inst_sample_period_attr.attr,
 	&htmm_split_period_attr.attr,
 	&htmm_thres_hot_attr.attr,
-	&htmm_thres_cold_attr.attr,
+	&htmm_cooling_period_attr.attr,
+	&htmm_adaptation_period_attr.attr,
 	&ksampled_min_sample_ratio_attr.attr,
 	&ksampled_max_sample_ratio_attr.attr,
 	&htmm_demotion_period_attr.attr,
@@ -3556,11 +3620,12 @@ static struct attribute *htmm_attrs[] = {
 	&ksampled_soft_cpu_quota_attr.attr,
 	&htmm_thres_split_attr.attr,
 	&htmm_static_thres_attr.attr,
-	&htmm_thres_adjust_attr.attr,
 	&htmm_util_weight_attr.attr,
 	&htmm_mode_attr.attr,
 	&htmm_gamma_attr.attr,
 	&htmm_cxl_mode_attr.attr,
+	&htmm_skip_cooling_attr.attr,
+	&htmm_thres_cooling_alloc_attr.attr,
 	NULL,
 };
 

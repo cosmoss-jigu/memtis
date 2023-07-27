@@ -395,6 +395,7 @@ struct mem_cgroup {
 	bool split_happen;
 	bool need_split;
 	unsigned int cooling_clock;
+	unsigned long nr_alloc;
 #endif /* CONFIG_HTMM */
 	struct mem_cgroup_per_node *nodeinfo[];
 };
