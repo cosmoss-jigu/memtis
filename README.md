@@ -9,10 +9,12 @@
 MEMTIS currently supports two system configurations
 * DRAM + Intel DCPMM (used only single socket)
 * local DRAM + remote DRAM (used two socket)
-(Please refer to memtis-userspace/README.md for details)
+
+Please refer to memtis-userspace/README.md for details
 
 ## Source code information
 See linux/
+
 You have to enable CONFIG\_HTMM when compiling the linux source.
 ```
 make menuconfig
@@ -23,11 +25,13 @@ CONFIG_HTMM=y
 
 ### Dependencies
 There are nothing special libraries for MEMTIS itself.
+
 (You just need to install libraries for Linux compilation.)
 
 ## For experiments
 ### Userspace scripts
 See memtis-userspace/
+
 Please read memtis-userspace/README.md for detailed explanations
 
 ### Setting tiered memory systems with Intel DCPMM
@@ -43,14 +47,18 @@ sudo daxctl reconfigure-device dax0.0 --mode=system-ram
 ```
 
 ### Preparing benchmarks
-We used open-sourced benchmarks except SPECCPU2017
-We provide links to each benchmark source in memtis-userspace/bench\_dir/README.md
+We used open-sourced benchmarks except SPECCPU2017.
+
+We provided links to each benchmark source in memtis-userspace/bench\_dir/README.md
 
 ### Running benchmarks
 It is necessary to create/update a simple script for each benchmark.
 If you want to execute *XSBench*, for instance, you have to create memtis-userspace/bench\_cmds/XSBench.sh.
+
 This is a sample.
 ```
+# memtis-userspace/bench_cmds/XSBench.sh
+
 BIN=/benchmark_source_dir
 BENCH_RUN="${BIN}/XSBench [Options]"
 
@@ -90,7 +98,7 @@ See memtis-userspace/README.md
 To be updated 
 
 ## Authors
-- Taehyung Lee (Sungkyunkwan University, SKKU) <taehyunggg@skku.edu> <taehyung.tlee@gmail.com>
+- Taehyung Lee (Sungkyunkwan University, SKKU) <taehyunggg@skku.edu>, <taehyung.tlee@gmail.com>
 - Sumit Kumar Monga (Virginia Tech) <sumitkm@vt.edu>
 - Changwoo Min (Virginia Tech) <changwoo@vt.edu>
 - Young Ik Eom (Sungkyunkwan University, SKKU) <yieom@skku.edu>
