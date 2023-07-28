@@ -5242,6 +5242,7 @@ static struct mem_cgroup *mem_cgroup_alloc(void)
 	memcg->prev_dram_sampled = 0;
 	memcg->max_dram_sampled = 0;
 	memcg->prev_max_dram_sampled = 0;
+	memcg->nr_max_sampled = 0;
 	/* thresholds */
 	memcg->active_threshold = htmm_thres_hot;
 	memcg->warm_threshold = htmm_thres_hot;
@@ -7643,11 +7644,11 @@ static int memcg_access_map_show(struct seq_file *m, void *v)
     if (!s.buffer)
 	return 0;
     for (i = 20; i > 15; i--) {
-	seq_buf_printf(&s, "access_map[%2d]: %10lu\n", i, memcg->access_map[i]);
+	seq_buf_printf(&s, "skewness_idx_map[%2d]: %10lu\n", i, memcg->access_map[i]);
     }
 
     for (i = 15; i >= 0; i--) {
-	seq_buf_printf(&s, "access_map[%2d]: %10lu  hotness_hg[%2d]: %10lu  ebp_hotness_hg[%2d]: %10lu\n",
+	seq_buf_printf(&s, "skewness_idx_map[%2d]: %10lu  hotness_hg[%2d]: %10lu  ebp_hotness_hg[%2d]: %10lu\n",
 		i, memcg->access_map[i], i, memcg->hotness_hg[i], i, memcg->ebp_hotness_hg[i]);
 
 

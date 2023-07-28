@@ -1368,10 +1368,12 @@ void update_pginfo(pid_t pid, unsigned long address, enum events e)
 	memcg->nr_sampled++;
 	memcg->nr_sampled_for_split++;
 	memcg->nr_dram_sampled++;
+	memcg->nr_max_sampled++;
     }
     else if (ret == 2) {
 	memcg->nr_sampled++;
 	memcg->nr_sampled_for_split++;
+	memcg->nr_max_sampled++;
     } else
 	goto mmap_unlock;
     
@@ -1420,9 +1422,10 @@ void update_pginfo(pid_t pid, unsigned long address, enum events e)
 		    set_memcg_split_thres(memcg);
 		}
 	    }
+	    printk("total_accesses: %lu max_dram_hits: %lu cur_hits: %lu \n",
+		    memcg->nr_max_sampled, memcg->prev_max_dram_sampled, memcg->prev_dram_sampled);
+	    memcg->nr_max_sampled >>= 1;
 	}
-
-	printk("max_dram_ratio: %lu dram ratio: %lu \n", memcg->prev_max_dram_sampled, memcg->prev_dram_sampled);
     }
     /* threshold adaptation */
     else if (memcg->nr_sampled % htmm_adaptation_period == 0) {

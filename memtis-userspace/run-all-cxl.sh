@@ -20,8 +20,8 @@ do
 	continue
     fi
 
-    mkdir -p results/${BENCH}/all-nvm/static
-    LOG_DIR=results/${BENCH}/all-nvm/static
+    mkdir -p results/${BENCH}/all-cxl/static
+    LOG_DIR=results/${BENCH}/all-cxl/static
 
     free;sync;echo 3 > /proc/sys/vm/drop_caches;free;
 

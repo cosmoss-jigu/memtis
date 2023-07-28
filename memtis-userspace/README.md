@@ -20,6 +20,15 @@ Execution time may vary depending on system configurations. Execution times for 
 
 ** Running MEMTIS in the CXL emulation mode after rebooting the server. 
 
+You can parse results by using "parse-results.sh"
+- Fig.5: memtis-perf.dat
+- Fig.6: results/${BENCH}/memtis-all/[Memory config.]/hotness\_stat.txt
+- Fig.7: memtis-scalability.dat
+- Fig.8: memtis-stat.dat
+- Fig.9: results/[btree or silo]/memtis-all/1:8/throughput.out 
+- Fig.10: memtis-hitratio.dat
+- Fig.11: memtis-cxl.dat
+
 ## Tips for setting other systems
 ### Limits the DRAM size
 * AutoNUMA, AutoTiering, Tiering-0.8, TPP: use memmap option

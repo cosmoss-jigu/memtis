@@ -367,6 +367,7 @@ struct mem_cgroup {
 	unsigned long prev_dram_sampled; /* accesses to DRAM n(i-1) */
 	unsigned long max_dram_sampled; /* accesses to DRAM (estimated) */
 	unsigned long prev_max_dram_sampled; /* accesses to DRAM (estimated) */
+	unsigned long nr_max_sampled; /* the calibrated number of accesses to both DRAM and NVM */
 	/* thresholds */
 	unsigned int active_threshold; /* hot */
 	unsigned int warm_threshold;

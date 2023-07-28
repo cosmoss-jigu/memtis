@@ -94,6 +94,7 @@ function func_prepare() {
 }
 
 function func_main() {
+    ${DIR}/bin/kill_ksampled
     TIME="/usr/bin/time"
 
     if [[ "x${CONFIG_PERF}" == "xon" ]]; then
@@ -103,7 +104,7 @@ function func_main() {
     fi
     
     # use 16 threads 
-    PINNING="taskset -c 0-15"
+    PINNING="taskset -c 0-19"
 
     echo "-----------------------"
     echo "NVM RATIO: ${NVM_RATIO}"
@@ -172,10 +173,12 @@ function func_usage() {
     echo
     echo "  -B,   --benchmark   [arg]    benchmark name to run. e.g., graph500, Liblinear, etc"
     echo "  -R,   --ratio       [arg]    fast tier size vs. capacity tier size: \"1:16\", \"1:8\", or \"1:2\""
+    echo "  -D,   --dram        [arg]    static dram size [MB or GB]; only available when -R is set to \"static\""
     echo "  -V,   --version     [arg]    a version name for results"
     echo "  -NS,  --nosplit              disable skewness-aware page size determination"
+    echo "  -NW,  --nowarm               disable the warm set"
     echo "        --cxl                  enable cxl mode [default: disabled]"
-    echo "  -?,   --help                 give this help list"
+    echo "  -?,   --help"
     echo "        --usage"
     echo
 }
