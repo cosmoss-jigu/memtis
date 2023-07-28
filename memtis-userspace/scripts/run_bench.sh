@@ -9,7 +9,8 @@ NMEM_NODES=$(cat /sys/devices/system/node/has_memory | awk -F '-' '{print $NF+1}
 MEM_NODES=($(ls /sys/devices/system/node | grep node | awk -F 'node' '{print $NF}'))
 
 CGROUP_NAME="htmm"
-DIR=/home/taehyung/workspace/tmm/memtis-userspace
+###### update DIR!
+DIR=/home/taehyung/workspace/memtis/memtis-userspace
 
 CONFIG_PERF=off
 CONFIG_NS=off
