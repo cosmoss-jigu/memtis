@@ -88,8 +88,10 @@ make
 
 # run
 sudo ./scripts/run_bench.sh -B ${BENCH} -R ${MEM_CONFIG} -V ${TEST_NAME}
-## or
-sudo ./run.sh
+## or use scripts
+sudo ./run-fig5-6-10.sh
+sudo ./run-fig7.sh
+...
 ```
 
 #### Tips for setting other tiered memory systems
