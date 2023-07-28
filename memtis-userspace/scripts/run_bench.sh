@@ -13,7 +13,9 @@ DIR=/home/taehyung/workspace/tmm/memtis-userspace
 
 CONFIG_PERF=off
 CONFIG_NS=off
+CONFIG_NW=off
 CONFIG_CXL_MODE=off
+STATIC_DRAM=""
 DATE=""
 VER=""
 
@@ -27,19 +29,26 @@ function func_memtis_setting() {
     echo 199 | tee /sys/kernel/mm/htmm/htmm_sample_period
     echo 100007 | tee /sys/kernel/mm/htmm/htmm_inst_sample_period
     echo 1 | tee /sys/kernel/mm/htmm/htmm_thres_hot
-    echo 0 | tee /sys/kernel/mm/htmm/htmm_static_thres
     echo 2 | tee /sys/kernel/mm/htmm/htmm_split_period
-    echo 100000 | tee /sys/kernel/mm/htmm/htmm_thres_adjust
-    echo 2000000 | tee /sys/kernel/mm/htmm/htmm_thres_cold
+    echo 100000 | tee /sys/kernel/mm/htmm/htmm_adaptation_period
+    echo 2000000 | tee /sys/kernel/mm/htmm/htmm_cooling_period
     echo 2 | tee /sys/kernel/mm/htmm/htmm_mode
-    echo 50 | tee /sys/kernel/mm/htmm/htmm_demotion_period_in_ms
-    echo 50 | tee /sys/kernel/mm/htmm/htmm_promotion_period_in_ms
+    echo 500 | tee /sys/kernel/mm/htmm/htmm_demotion_period_in_ms
+    echo 500 | tee /sys/kernel/mm/htmm/htmm_promotion_period_in_ms
     echo 4 | tee /sys/kernel/mm/htmm/htmm_gamma
+    ###  cpu cap (per mille) for ksampled
+    echo 30 | tee /sys/kernel/mm/htmm/ksampled_soft_cpu_quota
 
     if [[ "x${CONFIG_NS}" == "xoff" ]]; then
 	echo 1 | tee /sys/kernel/mm/htmm/htmm_thres_split
     else
 	echo 0 | tee /sys/kernel/mm/htmm/htmm_thres_split
+    fi
+
+    if [[ "x${CONFIG_NW}" == "xoff" ]]; then
+	echo 0 | tee /sys/kernel/mm/htmm/htmm_static_thres
+    else
+	echo 2 | tee /sys/kernel/mm/htmm/htmm_static_thres
     fi
 
     if [[ "x${CONFIG_CXL_MODE}" == "xon" ]]; then
@@ -68,6 +77,12 @@ function func_prepare() {
 
 	export BENCH_NAME
 	export NVM_RATIO
+
+	if [[ "x${NVM_RATIO}" == "xstatic" ]]; then
+	    if [[ "x${STATIC_DRAM}" != "x" ]]; then
+		export STATIC_DRAM
+	    fi
+	fi
 
 	if [[ -e ${DIR}/bench_cmds/${BENCH_NAME}.sh ]]; then
 	    source ${DIR}/bench_cmds/${BENCH_NAME}.sh
@@ -195,8 +210,21 @@ while (( "$#" )); do
 		exit -1
 	    fi
 	    ;;
+	-D|--dram)
+	    if [ -n "$2" ] && [ ${2:0:1} != "-" ]; then
+		STATIC_DRAM="$2"
+		shift 2
+	    else
+		func_usage
+		exit -1
+	    fi
+	    ;;
 	-NS|--nosplit)
 	    CONFIG_NS=on
+	    shift 1
+	    ;;
+	-NW|--nowarm)
+	    CONFIG_NW=on
 	    shift 1
 	    ;;
 	--cxl)

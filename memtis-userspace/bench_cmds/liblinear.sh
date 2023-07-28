@@ -1,20 +1,16 @@
 #!/bin/bash
-BENCH_BIN=/home/taehyung/workspace/tmm/memtis-userspace/bench_dir/liblinear-multicore-2.45-1
-
-MAX_THREADS=$(grep -c processor /proc/cpuinfo)
-BENCH_RUN=""
-BENCH_DRAM=""
+BENCH_BIN=/path/to/benchmark
 
 # anon footprint 79640MB
 # file footprint 21581MB
 
-BENCH_RUN+="${BENCH_BIN}/train -s 6 -m 16 ${BENCH_BIN}/datasets/kdd12"
-
+BENCH_RUN="${BENCH_BIN}/train -s 6 -m 20 ${BENCH_BIN}/datasets/kdd12"
+# Liblinear requires a dataset file (kdd12)
+# Please refer to memtis-userspace/bench_dir/README.md for downloading this dataset
 
 if [[ "x${NVM_RATIO}" == "x1:16" ]]; then
     BENCH_DRAM="4150MB"
 elif [[ "x${NVM_RATIO}" == "x1:8" ]]; then
-    #B-ENCH_DRAM="7849MB"
     BENCH_DRAM="8000MB"
 elif [[ "x${NVM_RATIO}" == "x1:4" ]]; then
     BENCH_DRAM="14128MB"

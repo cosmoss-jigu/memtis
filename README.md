@@ -59,7 +59,7 @@ This is a sample.
 ```
 # memtis-userspace/bench_cmds/XSBench.sh
 
-BIN=/benchmark_source_dir
+BIN=/path/to/benchmark
 BENCH_RUN="${BIN}/XSBench [Options]"
 
 # Provide the DRAM size for each memory configuration setting.
@@ -85,9 +85,12 @@ cd memtis-userspace/
 # check running options
 ./scripts/run_bench.sh --help
 
+# create an executable binary file
+make
+
 # run
 sudo ./scripts/run_bench.sh -B ${BENCH} -R ${MEM_CONFIG} -V ${TEST_NAME}
-# or
+## or
 sudo ./run.sh
 ```
 

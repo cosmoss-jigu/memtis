@@ -1,7 +1,7 @@
 #!/bin/bash
 
 BIN=/path/to/benchmark
-BENCH_RUN="${BIN}/XSBench -t 20 -g 130000 -p 30000000"
+BENCH_RUN="${BIN}/omp-csr -s 27 -e 15 -V"
 BENCH_DRAM=""
 
 

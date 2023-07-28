@@ -1,35 +1,26 @@
 # MEMTIS userspace
 
-## Benchmarks
-see bench\_dir/README.md
+## For artifact evaluation
+1) Install benchmarks to ./bench\_dir
 
-## Using Intel Optane DC PMM
-```
-sudo daxctl reconfigure-device dax0.0 --mode=system-ram
-sudo daxctl reconfigure-device dax1.0 --mode=system-ram
-```
+2) Create ./bench\_cmds/[Benchmark].sh file
 
-## build
-```
-make
-```
-or
-```
-make all
-# This additionally build the benchmarks
-```
+3) Execute ./run-all-nvm.sh, ./run-all-nvm-fig7.sh for obtaining baseline performance
 
-## run
-see options
-```
-./scripts/run_bench.sh --help
-```
-execute
-```
-sudo ./run.sh
-```
+4) Execute ./run-fig5-6-10.sh, ./run-fig7.sh, ./run-fig8-9.sh, and ./run-fig11.sh
 
-## Setting for other systems
+Execution time may vary depending on system configurations. Execution times for each script in our machine are as follows:
+- ./run-all-nvm.sh --> 7h 20m
+- ./run-all-nvm-fig7.sh --> 15h
+- ./run-fig5-6-10.sh --> 12140s except silo, btree
+- ./run-fig7.sh --> 4h
+- ./run-fig8-9 --> 3 times more than ./run-fig5-6-10.sh 
+- ./run-all-cxl.sh --> 
+- ./run-fig11.sh --> 4h
+
+** Running MEMTIS in the CXL emulation mode after rebooting the server. 
+
+## Tips for setting other systems
 ### Limits the DRAM size
 * AutoNUMA, AutoTiering, Tiering-0.8, TPP: use memmap option
     * e.g., grubby --args="memmap=000M\!000M" --update-kernel=${kernel path or number}
