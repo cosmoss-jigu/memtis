@@ -151,6 +151,15 @@ function func_main() {
     cat /proc/vmstat | grep -e thp -e htmm -e pgmig > ${LOG_DIR}/after_vmstat.log
     sleep 2
 
+    if [[ "x${BENCH_NAME}" == "xbtree" ]]; then
+	cat ${LOG_DIR}/output.log | grep Throughput \
+	    | awk ' NR%20==0 { print sum ; sum = 0 ; next} { sum+=$3 }' \
+	    > ${LOG_DIR}/throughput.out
+    elif [[ "x${BENCH_NAME}" =~ "xsilo" ]]; then
+	cat ${LOG_DIR}/output.log | grep -e '0 throughput' -e '5 throughput' \
+	    | awk ' { print $4 }' > ${LOG_DIR}/throughput.out
+    fi
+
     sudo dmesg -c > ${LOG_DIR}/dmesg.txt
     # disable htmm
     sudo ${DIR}/scripts/set_htmm_memcg.sh htmm $$ disable
