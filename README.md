@@ -8,9 +8,7 @@
 
 MEMTIS currently supports two system configurations
 * DRAM + Intel DCPMM (used only single socket)
-* local DRAM + remote DRAM (used two socket)
-
-Please refer to memtis-userspace/README.md for details
+* local DRAM + remote DRAM (used two socket, CXL emulation mode)
 
 ## Source code information
 See linux/
