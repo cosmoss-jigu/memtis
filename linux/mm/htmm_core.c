@@ -1309,16 +1309,13 @@ static void __adjust_active_threshold(struct mm_struct *mm,
     }
 
     /* set warm threshold */
-    if (!htmm_static_thres) { // warm enabled
+    if (!htmm_nowarm) { // warm enabled
 	if (need_warm)
 	    memcg->warm_threshold = memcg->active_threshold - 1;
 	else
 	    memcg->warm_threshold = memcg->active_threshold;
-    } else if (htmm_static_thres == 1) { // disable warm
+    } else { // disable warm
 	memcg->warm_threshold = memcg->active_threshold;
-    } else { // static threshold
-	memcg->active_threshold = htmm_thres_hot;
-	memcg->warm_threshold = htmm_thres_hot;
     }
 }
 

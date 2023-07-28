@@ -3039,7 +3039,7 @@ unsigned int ksampled_max_sample_ratio = 10; // 10%
 unsigned int htmm_demotion_period_in_ms = 500;
 unsigned int htmm_promotion_period_in_ms = 500;
 unsigned int htmm_thres_split = 2; 
-unsigned int htmm_static_thres = 0;
+unsigned int htmm_nowarm = 0; // enabled: 0, disabled: 1
 unsigned int htmm_util_weight = 10; // no impact (unused)
 unsigned int htmm_mode = 1;
 unsigned int htmm_gamma = 4; /* 0.4; divide this by 10 */
@@ -3383,13 +3383,13 @@ static struct kobj_attribute htmm_thres_split_attr =
 	__ATTR(htmm_thres_split, 0644, htmm_thres_split_show,
 	       htmm_thres_split_store);
 
-static ssize_t htmm_static_thres_show(struct kobject *kobj,
+static ssize_t htmm_nowarm_show(struct kobject *kobj,
 				   struct kobj_attribute *attr, char *buf)
 {
-	return sysfs_emit(buf, "%u\n", htmm_static_thres);
+	return sysfs_emit(buf, "%u\n", htmm_nowarm);
 }
 
-static ssize_t htmm_static_thres_store(struct kobject *kobj,
+static ssize_t htmm_nowarm_store(struct kobject *kobj,
 				    struct kobj_attribute *attr,
 				    const char *buf, size_t count)
 {
@@ -3400,13 +3400,13 @@ static ssize_t htmm_static_thres_store(struct kobject *kobj,
 	if (err)
 		return err;
 
-	WRITE_ONCE(htmm_static_thres, thres);
+	WRITE_ONCE(htmm_nowarm, thres);
 	return count;
 }
 
-static struct kobj_attribute htmm_static_thres_attr =
-	__ATTR(htmm_static_thres, 0644, htmm_static_thres_show,
-	       htmm_static_thres_store);
+static struct kobj_attribute htmm_nowarm_attr =
+	__ATTR(htmm_nowarm, 0644, htmm_nowarm_show,
+	       htmm_nowarm_store);
 
 static ssize_t htmm_adaptation_period_show(struct kobject *kobj,
 				   struct kobj_attribute *attr, char *buf)
@@ -3619,7 +3619,7 @@ static struct attribute *htmm_attrs[] = {
 	&htmm_promotion_period_attr.attr,
 	&ksampled_soft_cpu_quota_attr.attr,
 	&htmm_thres_split_attr.attr,
-	&htmm_static_thres_attr.attr,
+	&htmm_nowarm_attr.attr,
 	&htmm_util_weight_attr.attr,
 	&htmm_mode_attr.attr,
 	&htmm_gamma_attr.attr,

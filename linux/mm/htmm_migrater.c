@@ -387,7 +387,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 	if (!PageAnon(page) && nr_demotion_cand > nr_to_reclaim + HTMM_MIN_FREE_PAGES)
 	    goto keep_locked;
 
-	if (htmm_static_thres == 0 && PageAnon(page)) {
+	if (htmm_nowarm == 0 && PageAnon(page)) {
 	    if (PageTransHuge(page)) {
 		struct page *meta = get_meta_page(page);
 
@@ -610,7 +610,7 @@ static unsigned long demote_node(pg_data_t *pgdat, struct mem_cgroup *memcg,
 	priority--;
     } while (priority);
 
-    if (htmm_static_thres == 0) {
+    if (htmm_nowarm == 0) {
 	int target_nid = htmm_cxl_mode ? 1 : next_demotion_node(pgdat->node_id);
 	unsigned long nr_lowertier_active =
 	    target_nid == NUMA_NO_NODE ? 0: need_lowertier_promotion(NODE_DATA(target_nid), memcg);

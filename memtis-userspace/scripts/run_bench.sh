@@ -47,9 +47,9 @@ function func_memtis_setting() {
     fi
 
     if [[ "x${CONFIG_NW}" == "xoff" ]]; then
-	echo 0 | tee /sys/kernel/mm/htmm/htmm_static_thres
+	echo 0 | tee /sys/kernel/mm/htmm/htmm_nowarm
     else
-	echo 2 | tee /sys/kernel/mm/htmm/htmm_static_thres
+	echo 1 | tee /sys/kernel/mm/htmm/htmm_nowarm
     fi
 
     if [[ "x${CONFIG_CXL_MODE}" == "xon" ]]; then
