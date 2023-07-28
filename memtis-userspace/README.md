@@ -12,10 +12,10 @@
 Execution time may vary depending on system configurations. Execution times for each script in our machine are as follows:
 - ./run-all-nvm.sh --> 7h 20m
 - ./run-all-nvm-fig7.sh --> 15h
-- ./run-fig5-6-10.sh --> 12140s except silo, btree
+- ./run-fig5-6-10.sh --> 7h
 - ./run-fig7.sh --> 4h
-- ./run-fig8-9 --> 3 times more than ./run-fig5-6-10.sh 
-- ./run-all-cxl.sh --> 
+- ./run-fig8-9 --> 7h
+- ./run-all-cxl.sh --> 2h 15m
 - ./run-fig11.sh --> 4h
 
 ** Running MEMTIS in the CXL emulation mode after rebooting the server. 
