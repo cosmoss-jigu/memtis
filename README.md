@@ -97,6 +97,9 @@ sudo ./run-fig7.sh
 #### Tips for setting other tiered memory systems
 See memtis-userspace/README.md
 
+## Commit number used for artifact evaluation
+174ca88
+
 ## Bibtex
 To be updated 
 

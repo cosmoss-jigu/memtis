@@ -11,7 +11,7 @@ sudo echo "always" | tee /sys/kernel/mm/transparent_hugepage/defrag
 for BENCH in ${BENCHMARKS};
 do
     export GOMP_CPU_AFFINITY=0-19
-    if [[ -e ./benches/${BENCH}.sh ]]; then
+    if [[ -e ./bench_cmds/${BENCH}.sh ]]; then
 	source ./bench_cmds/${BENCH}.sh
     else
 	echo "ERROR: ${BENCH}.sh does not exist."
@@ -23,7 +23,7 @@ do
 
     free;sync;echo 3 > /proc/sys/vm/drop_caches;free;
 
-    time -f "execution time %e (s)" \
+    /usr/bin/time -f "execution time %e (s)" \
 	numactl -N 0 -m 2 ${BENCH_RUN} 2>&1 \
 	| tee ${LOG_DIR}/output.log
 
