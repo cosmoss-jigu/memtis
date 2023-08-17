@@ -103,7 +103,7 @@ function func_main() {
 	PERF=""
     fi
     
-    # use 16 threads 
+    # use 20 threads 
     PINNING="taskset -c 0-19"
 
     echo "-----------------------"
