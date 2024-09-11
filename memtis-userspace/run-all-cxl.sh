@@ -13,7 +13,7 @@ sudo ./scripts/set_uncore_freq.sh on
 for BENCH in ${BENCHMARKS};
 do
     export GOMP_CPU_AFFINITY=0-19
-    if [[ -e ./benches/${BENCH}.sh ]]; then
+    if [[ -e ./bench_cmds/${BENCH}.sh ]]; then
 	source ./bench_cmds/${BENCH}.sh
     else
 	echo "ERROR: ${BENCH}.sh does not exist."
