@@ -14,7 +14,7 @@ launch_bench: launch_bench.c
 	${CC} ${CFLAGS} launch_bench.c -o ${DIR}/launch_bench
 
 kill_ksampled: kill_ksampled.c
-	${CC} ${CFLAGS} launch_bench.c -o ${DIR}/kill_ksampled
+	${CC} ${CFLAGS} kill_ksampled.c -o ${DIR}/kill_ksampled
 
 clean:
 	rm ${DIR}/launch_bench ${DIR}/launch_bench_nopid ${DIR}/kill_ksampled
