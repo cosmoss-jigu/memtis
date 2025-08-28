@@ -91,9 +91,9 @@ unsigned long get_memcg_promotion_watermark(unsigned long max_nr_pages)
 {
     max_nr_pages = max_nr_pages * 3 / 100; // 3%
     if (max_nr_pages < MAX_WATERMARK_LOWER_LIMIT)
-	return MIN_WATERMARK_LOWER_LIMIT;
+	return MAX_WATERMARK_LOWER_LIMIT;
     else if (max_nr_pages > MAX_WATERMARK_UPPER_LIMIT)
-	return MIN_WATERMARK_UPPER_LIMIT;
+	return MAX_WATERMARK_UPPER_LIMIT;
     else
 	return max_nr_pages;
 }
