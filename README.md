@@ -104,10 +104,19 @@ See memtis-userspace/README.md
 <a rel="license" href="http://creativecommons.org/licenses/by-nc/4.0/"><img alt="Creative Commons License" style="border-width:0" src="https://i.creativecommons.org/l/by-nc/4.0/88x31.png" /></a><br />This work is licensed under a <a rel="license" href="http://creativecommons.org/licenses/by-nc/4.0/">Creative Commons Attribution-NonCommercial 4.0 International License</a>.
 
 ## Bibtex
-To be updated 
+```
+@inproceedings{10.1145/3600006.3613167,
+author = {Lee, Taehyung and Monga, Sumit Kumar and Min, Changwoo and Eom, Young Ik},
+title = {MEMTIS: Efficient Memory Tiering with Dynamic Page Classification and Page Size Determination},
+year = {2023},
+doi = {10.1145/3600006.3613167},
+booktitle = {Proceedings of the 29th Symposium on Operating Systems Principles},
+series = {SOSP '23}
+}
+```
 
 ## Authors
-- Taehyung Lee (Sungkyunkwan University, SKKU) <taehyunggg@skku.edu>, <taehyung.tlee@gmail.com>
+- Taehyung Lee (Sungkyunkwan University, SKKU) <taehyung.tlee@gmail.com>
 - Sumit Kumar Monga (Virginia Tech) <sumitkm@vt.edu>
 - Changwoo Min (Virginia Tech) <changwoo@vt.edu>
 - Young Ik Eom (Sungkyunkwan University, SKKU) <yieom@skku.edu>
